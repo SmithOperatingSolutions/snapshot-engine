@@ -3,6 +3,7 @@ package table
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/hash"
@@ -30,7 +31,49 @@ func (Model) FormatVersion() uint16 { return Format }
 // map with the count the record claims, every row under the schema, and
 // every index as full as the primary map.
 func (m Model) Validate(ctx context.Context, root model.Root, r chunk.Reader) error {
-	return errors.New("table: not implemented")
+	t, err := Open(ctx, readOnly{r}, m.Config, root)
+	if err != nil {
+		return err
+	}
+	rows, err := t.Scan(ctx)
+	if err != nil {
+		return err
+	}
+	var n uint64
+	for {
+		_, _, ok, err := rows.Next()
+		if err != nil {
+			return err
+		}
+		if !ok {
+			break
+		}
+		n++
+	}
+	if n != root.Size {
+		return fmt.Errorf("%w: %d rows scanned, the root says %d", chunk.ErrCorrupt, n, root.Size)
+	}
+	for _, ix := range t.schema.Indexes {
+		rows, err := t.IndexLookup(ctx, ix.Tag)
+		if err != nil {
+			return err
+		}
+		var seen uint64
+		for {
+			_, _, ok, err := rows.Next() // each entry decodes and names a row that exists
+			if err != nil {
+				return err
+			}
+			if !ok {
+				break
+			}
+			seen++
+		}
+		if seen != n {
+			return fmt.Errorf("%w: index %d walks %d rows of %d", chunk.ErrCorrupt, ix.Tag, seen, n)
+		}
+	}
+	return nil
 }
 
 // Walk implements model.Walker: the root chunk, then every map.
