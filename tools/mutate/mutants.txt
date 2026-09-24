@@ -388,3 +388,67 @@ find: conv, err := from.convertRow(row, mg.mt.schema)
 replace: conv, err := row, error(nil)
 pkg: ./model/table
 run: ^TestSchemasMergeByTag$
+# model/document
+
+id: document-parse-refuses-text-over-the-limit
+file: model/document/json.go
+find: if len(text) > MaxDocument {
+replace: if len(text) > MaxDocument && false {
+pkg: ./model/document
+run: ^TestWhatIsNotADocumentIsRefused$
+
+id: document-parse-refuses-bytes-after-the-value
+file: model/document/json.go
+find: if p.i != len(p.s) {\n\t\treturn merge.Node{}, p.fail("bytes after the value")\n\t}
+replace: if p.i != len(p.s) && false {\n\t\treturn merge.Node{}, p.fail("bytes after the value")\n\t}
+pkg: ./model/document
+run: ^TestWhatIsNotADocumentIsRefused$
+
+id: document-parse-refuses-a-field-twice
+file: model/document/json.go
+find: if seen[name] {
+replace: if seen[name] && false {
+pkg: ./model/document
+run: ^TestWhatIsNotADocumentIsRefused$
+
+id: document-parse-bounds-the-depth
+file: model/document/json.go
+find: if depth > MaxDepth {\n\t\treturn merge.Node{}, p.fail(fmt.Sprintf("nested past %d levels", MaxDepth))\n\t}\n\tp.i++ // [
+replace: p.i++ // [
+pkg: ./model/document
+run: ^TestWhatIsNotADocumentIsRefused$
+
+id: document-parse-refuses-a-lone-surrogate
+file: model/document/json.go
+find: if low < 0xDC00 || low > 0xDFFF {
+replace: if false {
+pkg: ./model/document
+run: ^TestWhatIsNotADocumentIsRefused$
+
+id: document-parse-refuses-a-control-character
+file: model/document/json.go
+find: case c < 0x20:\n\t\t\treturn "", p.fail("a control character in a string")
+replace: case false:\n\t\t\treturn "", p.fail("a control character in a string")
+pkg: ./model/document
+run: ^TestWhatIsNotADocumentIsRefused$
+
+id: document-numbers-drop-trailing-zeros
+file: model/document/json.go
+find: all = strings.TrimRight(trimmed, "0")
+replace: all = trimmed
+pkg: ./model/document
+run: ^TestJSONParsesToOneCanonicalText$
+
+id: document-numbers-are-bounded
+file: model/document/json.go
+find: if intDigits > MaxNumberDigits || fracDigits > MaxNumberDigits {
+replace: if intDigits > MaxNumberDigits*2 || fracDigits > MaxNumberDigits*2 {
+pkg: ./model/document
+run: ^TestWhatIsNotADocumentIsRefused$
+
+id: document-encode-escapes-control-characters
+file: model/document/json.go
+find: case c < 0x20:\n\t\t\tb = append(b, 
+replace: case false:\n\t\t\tb = append(b, 
+pkg: ./model/document
+run: ^TestEncodeIsTheOneText$
