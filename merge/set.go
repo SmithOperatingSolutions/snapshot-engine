@@ -31,8 +31,15 @@ func (m Members[T]) Has(elem T) bool {
 // other added again, under a new tag, is present (observed remove).
 func Set[T comparable](base, ours, theirs Members[T]) Members[T] {
 	out := Members[T]{}
-	for t := range base {
-		out[t] = true
+	for t := range ours {
+		if theirs[t] || !base[t] { // kept by both, or added here
+			out[t] = true
+		}
+	}
+	for t := range theirs {
+		if !base[t] { // added there
+			out[t] = true
+		}
 	}
 	return out
 }
