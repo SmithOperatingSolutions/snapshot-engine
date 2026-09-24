@@ -1273,3 +1273,10 @@ find: out[h] = out[h] || ok
 replace: out[h] = out[h] || (ok && false)
 pkg: ./engine
 run: ^TestTheScratchStoreReadsTheRepositoryAndKeepsItsOwn$
+
+id: session-a-merge-refused-at-its-commit-is-undone
+file: engine/session.go
+find: if aerr := s.db.r.AbortMerge(ctx, s.p, s.branch); aerr != nil {
+replace: if aerr := error(nil); aerr != nil {
+pkg: ./engine
+run: ^TestAMergeThatCannotBeCommittedChangesNothing$

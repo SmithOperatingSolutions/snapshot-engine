@@ -208,7 +208,8 @@ func (s *Session) Commit(ctx context.Context, msg string) (Hash, error) {
 
 // Merge merges from into the session's branch through the models: clean, it
 // is committed with message, the merge commit's parents the branch's head
-// and from's commit; with conflicts the branch is left mid-merge (a Commit
+// and from's commit, as one call (refused or failed at the commit, the
+// merge is undone); with conflicts the branch is left mid-merge (a Commit
 // or another Merge is ErrMergeInProgress until AbortMerge); a commit the
 // branch already holds merges to nothing and returns the head.
 func (s *Session) Merge(ctx context.Context, from Ref, msg string) (MergeResult, error) {
@@ -251,7 +252,10 @@ func (s *Session) Merge(ctx context.Context, from Ref, msg string) (MergeResult,
 		return MergeResult{Commit: head.Hash}, nil
 	}
 	c, err := s.db.r.CommitWorkingSet(ctx, s.p, s.branch, msg)
-	if err != nil {
+	if err != nil { // refused or failed at the commit: the merge is undone, the branch as it was
+		if aerr := s.db.r.AbortMerge(ctx, s.p, s.branch); aerr != nil {
+			return MergeResult{}, errors.Join(translate(err), translate(aerr))
+		}
 		return MergeResult{}, translate(err)
 	}
 	return MergeResult{Commit: c.Hash}, nil
