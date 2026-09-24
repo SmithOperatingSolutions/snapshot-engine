@@ -69,10 +69,11 @@ func checked(id, frame []byte) (merge.Node, error) {
 	return DecodeRecord(frame)
 }
 
-// Write stores records, by id, as an object.
+// Write stores records, by id, as an object: every record is checked
+// before anything is stored, then a new collection holds them all.
 func Write(ctx context.Context, s chunk.ReadWriter, c prolly.Config, records map[string]merge.Node) (model.Root, error) {
 	frames := make(map[string][]byte, len(records))
-	for id, n := range records { // every record checked before anything is stored
+	for id, n := range records {
 		if err := checkID([]byte(id)); err != nil {
 			return model.Root{}, err
 		}
@@ -82,44 +83,40 @@ func Write(ctx context.Context, s chunk.ReadWriter, c prolly.Config, records map
 		}
 		frames[id] = f
 	}
-	m, err := prolly.Empty(ctx, s, c)
+	col, err := Empty(ctx, s, c)
 	if err != nil {
 		return model.Root{}, err
 	}
-	e := m.Editor()
-	for id, f := range frames {
-		if err := e.Put([]byte(id), f); err != nil {
+	e := col.Edit()
+	for id, f := range frames { // checked above: put as encoded
+		if err := e.ed.Put([]byte(id), f); err != nil {
 			return model.Root{}, err
 		}
 	}
-	if m, err = e.Flush(ctx); err != nil {
+	if col, err = e.Flush(ctx); err != nil {
 		return model.Root{}, err
 	}
-	return spec(c).Root(m), nil
+	return col.Root(), nil
 }
 
 // Read returns an object's records by id.
 func Read(ctx context.Context, r chunk.Reader, c prolly.Config, root model.Root) (map[string]merge.Node, error) {
-	m, err := spec(c).Open(ctx, mapobject.ReadOnly(r), root)
+	col, err := Open(ctx, mapobject.ReadOnly(r), c, root)
 	if err != nil {
 		return nil, err
 	}
-	it, err := m.IterRange(ctx, nil, nil)
+	it, err := col.Scan(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]merge.Node, m.Count())
+	out := make(map[string]merge.Node, col.m.Count())
 	for {
-		id, f, ok, err := it.Next()
+		id, n, ok, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
 			return out, nil
-		}
-		n, err := checked(id, f)
-		if err != nil {
-			return nil, err
 		}
 		out[string(id)] = n
 	}

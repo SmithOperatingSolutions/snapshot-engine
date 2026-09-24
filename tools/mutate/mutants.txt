@@ -826,3 +826,59 @@ find: m, err := spec(c).Open(ctx, s, root)
 replace: m, err := prolly.Open(ctx, s, c, root.Hash)
 pkg: ./model/kv
 run: ^TestAMapRefusesWhatIsNotOurs$
+
+id: document-handle-put-checks-the-id
+file: model/document/handle.go
+find: func (e *CollectionEditor) Put(id []byte, n merge.Node) error {\n\tif err := checkID(id); err != nil {
+replace: func (e *CollectionEditor) Put(id []byte, n merge.Node) error {\n\tif err := checkID(id); err != nil && false {
+pkg: ./model/document
+run: ^TestARefusedCollectionEditWritesNothing$
+
+id: document-handle-putjson-parses
+file: model/document/handle.go
+find: n, err := Parse(text)\n\tif err != nil {
+replace: n, err := Parse(text)\n\tif err != nil && false {
+pkg: ./model/document
+run: ^TestARefusedCollectionEditWritesNothing$
+
+id: document-handle-delete-checks-the-id
+file: model/document/handle.go
+find: func (e *CollectionEditor) Delete(id []byte) error {\n\tif err := checkID(id); err != nil {
+replace: func (e *CollectionEditor) Delete(id []byte) error {\n\tif err := checkID(id); err != nil && false {
+pkg: ./model/document
+run: ^TestARefusedCollectionEditWritesNothing$
+
+id: document-handle-get-checks-the-id
+file: model/document/handle.go
+find: func (c *Collection) Get(ctx context.Context, id []byte) (merge.Node, bool, error) {\n\tif err := checkID(id); err != nil {
+replace: func (c *Collection) Get(ctx context.Context, id []byte) (merge.Node, bool, error) {\n\tif err := checkID(id); err != nil && false {
+pkg: ./model/document
+run: ^TestARefusedCollectionEditWritesNothing$
+
+id: document-handle-get-checks-the-frame
+file: model/document/handle.go
+find: n, err := checked(id, f)\n\tif err != nil {\n\t\treturn merge.Node{}, false, err
+replace: n, _ := checked(id, f)\n\tif err != nil {\n\t\treturn merge.Node{}, false, err
+pkg: ./model/document
+run: ^TestACollectionRefusesWhatIsNotOurs$
+
+id: document-handle-scan-checks-the-frame
+file: model/document/handle.go
+find: if n, err = checked(k, f); err != nil {
+replace: if n, _ = checked(k, f); err != nil {
+pkg: ./model/document
+run: ^TestACollectionRefusesWhatIsNotOurs$
+
+id: document-handle-scan-starts-at-its-id
+file: model/document/handle.go
+find: it, err := c.m.IterRange(ctx, from, nil)
+replace: it, err := c.m.IterRange(ctx, nil, nil)
+pkg: ./model/document
+run: ^TestACollectionScansInIDOrderFromAnID$
+
+id: document-handle-open-checks-the-root
+file: model/document/handle.go
+find: m, err := spec(c).Open(ctx, s, root)
+replace: m, err := prolly.Open(ctx, s, c, root.Hash)
+pkg: ./model/document
+run: ^TestACollectionRefusesWhatIsNotOurs$
