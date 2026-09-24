@@ -9,7 +9,13 @@ import "context"
 // not safe for concurrent use.
 type Txn struct {
 	s *Session
+
+	beforeSwap func() // a test seam: called before every swap Commit attempts
 }
+
+// maxCommitAttempts is how many times Commit re-reads, merges and swaps
+// before it gives up with ErrSerialization.
+const maxCommitAttempts = 5
 
 // begin opens a transaction for s. (Stub.)
 func begin(ctx context.Context, s *Session) (*Txn, error) { return nil, errNotImplemented }
