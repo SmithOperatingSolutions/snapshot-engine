@@ -86,3 +86,165 @@ find: if err1 != nil || err2 != nil {
 replace: if err1 != nil && err2 != nil {
 pkg: ./merge
 run: ^TestTreesMergeByPath$
+# model/kv
+
+id: kv-encode-refuses-an-unknown-kind
+file: model/kv/value.go
+find: if v.Kind != Bytes {
+replace: if v.Kind != Bytes && false {
+pkg: ./model/kv
+run: ^TestAFrameThatIsNotAValueIsRefused$
+
+id: kv-encode-caps-the-payload
+file: model/kv/value.go
+find: if len(v.Bytes) > MaxValueSize {
+replace: if len(v.Bytes) > MaxValueSize && false {
+pkg: ./model/kv
+run: ^TestAFrameThatIsNotAValueIsRefused$
+
+id: kv-decode-refuses-an-unknown-kind
+file: model/kv/value.go
+find: if Kind(b[0]) != Bytes {
+replace: if Kind(b[0]) != Bytes && false {
+pkg: ./model/kv
+run: ^TestAFrameThatIsNotAValueIsRefused$
+
+id: kv-decode-caps-the-payload
+file: model/kv/value.go
+find: if len(b)-1 > MaxValueSize {
+replace: if len(b)-1 > MaxValueSize && false {
+pkg: ./model/kv
+run: ^TestAFrameThatIsNotAValueIsRefused$
+
+id: kv-a-key-is-1-to-4096-bytes
+file: model/kv/kv.go
+find: if len(k) == 0 || len(k) > MaxKeySize {
+replace: if false {
+pkg: ./model/kv
+run: ^TestWriteRefusesABadKeyOrValue$
+
+id: kv-open-checks-the-format
+file: model/kv/kv.go
+find: if root.Format != Format {\n\t\treturn nil, fmt.Errorf("%w: kv format %d", model.ErrUnknownModel, root.Format)
+replace: if root.Format != Format && false {\n\t\treturn nil, fmt.Errorf("%w: kv format %d", model.ErrUnknownModel, root.Format)
+pkg: ./model/kv
+run: ^TestValidateRefusesWhatIsNotAnObject$
+
+id: kv-open-checks-the-depth
+file: model/kv/kv.go
+find: if root.Depth != 0 {\n\t\treturn nil, fmt.Errorf("%w: a kv root claims stream depth %d", chunk.ErrCorrupt, root.Depth)
+replace: if root.Depth != 0 && false {\n\t\treturn nil, fmt.Errorf("%w: a kv root claims stream depth %d", chunk.ErrCorrupt, root.Depth)
+pkg: ./model/kv
+run: ^TestValidateRefusesWhatIsNotAnObject$
+
+id: kv-open-checks-the-count
+file: model/kv/kv.go
+find: if m.Count() != root.Size {
+replace: if m.Count() != root.Size && false {
+pkg: ./model/kv
+run: ^TestValidateRefusesWhatIsNotAnObject$
+
+id: kv-read-decodes-every-value
+file: model/kv/kv.go
+find: return DecodeValue(frame)
+replace: return Value{Kind: Bytes, Bytes: frame}, nil
+pkg: ./model/kv
+run: ^TestValidateRefusesWhatIsNotAnObject$
+
+id: kv-walk-checks-the-format
+file: model/kv/kv.go
+find: if root.Format != Format {\n\t\treturn fmt.Errorf("%w: kv format %d", model.ErrUnknownModel, root.Format)
+replace: if root.Format != Format && false {\n\t\treturn fmt.Errorf("%w: kv format %d", model.ErrUnknownModel, root.Format)
+pkg: ./model/kv
+run: ^TestWalkNamesEveryChunkOfAnObject$
+
+id: kv-diff-locates-a-change-by-its-key
+file: model/kv/kv.go
+find: return model.Change{Kind: kinds[c.Kind], Location: c.Key}, true, nil
+replace: return model.Change{Kind: kinds[c.Kind]}, true, nil
+pkg: ./model/kv
+run: ^TestDiffIsOneChangePerKey$
+
+id: kv-diff-opens-both-sides
+file: model/kv/kv.go
+find: tm, err := open(ctx, readOnly{r}, m.Config, to)
+replace: tm, err := open(ctx, readOnly{r}, m.Config, model.Root{Hash: to.Hash, Size: to.Size, Format: Format})
+pkg: ./model/kv
+run: ^TestDiffIsOneChangePerKey$
+
+id: kv-merge-deleted-against-changed-conflicts
+file: model/kv/kv.go
+find: case ours.Kind == prolly.Removed || theirs.Kind == prolly.Removed:\n\t\treturn "deleted on one side and changed on the other"
+replace: case ours.Kind == prolly.Removed || theirs.Kind == prolly.Removed:\n\t\treturn ""
+pkg: ./model/kv
+run: ^TestMergeIsThreeWayPerKey$
+
+id: kv-merge-the-same-value-on-both-sides-is-clean
+file: model/kv/kv.go
+find: case bytes.Equal(ours.To, theirs.To):\n\t\treturn ""
+replace: case bytes.Equal(ours.To, theirs.To):\n\t\treturn "set to different values on both sides"
+pkg: ./model/kv
+run: ^TestMergeIsThreeWayPerKey$
+
+id: kv-merge-applies-what-only-theirs-changed
+file: model/kv/kv.go
+find: if err = apply(ed, ct); err == nil {\n\t\t\t\tct, okT, err = dTheirs.Next()\n\t\t\t}
+replace: ct, okT, err = dTheirs.Next()
+pkg: ./model/kv
+run: ^TestMergeIsThreeWayPerKey$
+
+id: kv-merge-a-conflict-keeps-ours
+file: model/kv/kv.go
+find: if len(conflicts) > 0 {\n\t\treturn model.MergeResult{Root: ours, Conflicts: conflicts}, nil\n\t}
+replace: if len(conflicts) > 0 {\n\t\treturn model.MergeResult{Root: ours}, nil\n\t}
+pkg: ./e2e
+run: ^TestBranchesSettingOneKeyToTwoValuesConflictOnThatKeyAlone$
+
+id: kv-merge-checks-what-it-applies
+file: model/kv/kv.go
+find: if _, err := checked(c.Key, c.To); err != nil {\n\t\treturn err\n\t}\n\treturn ed.Put(c.Key, c.To)
+replace: return ed.Put(c.Key, c.To)
+pkg: ./model/kv
+run: ^TestMergeAppliesOnlyValuesOfOurs$
+
+id: kv-merge-added-twice-is-a-conflict
+file: model/kv/kv.go
+find: case ours.Kind == prolly.Added:\n\t\treturn "added with different values on both sides"
+replace: case ours.Kind == prolly.Added:\n\t\treturn ""
+pkg: ./model/kv
+run: ^TestMergeDeletesForTheirsAndNamesAnAddedTwiceKey$
+
+id: kv-merge-applies-theirs-deletion
+file: model/kv/kv.go
+find: if c.Kind == prolly.Removed {\n\t\treturn ed.Delete(c.Key)\n\t}
+replace: if c.Kind == prolly.Removed {\n\t\treturn nil\n\t}
+pkg: ./model/kv
+run: ^TestMergeDeletesForTheirsAndNamesAnAddedTwiceKey$
+
+id: kv-merge-opens-each-side-under-its-root
+file: model/kv/kv.go
+find: if maps[i], err = open(ctx, rw, m.Config, r); err != nil {
+replace: if maps[i], err = open(ctx, rw, m.Config, model.Root{Hash: r.Hash, Size: r.Size, Format: Format}); err != nil {
+pkg: ./model/kv
+run: ^TestMergeDeletesForTheirsAndNamesAnAddedTwiceKey$
+
+id: kv-a-stored-key-is-checked
+file: model/kv/kv.go
+find: if err := checkKey(key); err != nil {\n\t\treturn Value{}, fmt.Errorf("%w: a stored key: %w", chunk.ErrCorrupt, err)\n\t}
+replace: if err := checkKey(key); err != nil && false {\n\t\treturn Value{}, fmt.Errorf("%w: a stored key: %w", chunk.ErrCorrupt, err)\n\t}
+pkg: ./model/kv
+run: ^TestValidateRefusesWhatIsNotAnObject$
+
+id: kv-walk-checks-the-depth
+file: model/kv/kv.go
+find: if root.Depth != 0 {\n\t\treturn fmt.Errorf("%w: a kv root claims stream depth %d", chunk.ErrCorrupt, root.Depth)
+replace: if root.Depth != 0 && false {\n\t\treturn fmt.Errorf("%w: a kv root claims stream depth %d", chunk.ErrCorrupt, root.Depth)
+pkg: ./model/kv
+run: ^TestWalkNamesEveryChunkOfAnObject$
+
+id: kv-diff-opens-from-under-its-root
+file: model/kv/kv.go
+find: fm, err := open(ctx, readOnly{r}, m.Config, from)
+replace: fm, err := open(ctx, readOnly{r}, m.Config, model.Root{Hash: from.Hash, Size: from.Size, Format: Format})
+pkg: ./model/kv
+run: ^TestDiffIsOneChangePerKey$
