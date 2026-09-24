@@ -52,6 +52,18 @@ func (readOnly) Put(context.Context, []byte) (hash.Hash, error) {
 
 // Create stores an empty table with schema.
 func Create(ctx context.Context, s chunk.ReadWriter, cfg prolly.Config, schema Schema) (*Table, error) {
+	t, err := empty(ctx, s, cfg, schema)
+	if err != nil {
+		return nil, err
+	}
+	if err := t.writeRoot(ctx); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+// empty is a table with schema and no rows, its root not yet written.
+func empty(ctx context.Context, s chunk.ReadWriter, cfg prolly.Config, schema Schema) (*Table, error) {
 	catalog, err := EncodeCatalog(schema)
 	if err != nil {
 		return nil, err
@@ -64,9 +76,6 @@ func Create(ctx context.Context, s chunk.ReadWriter, cfg prolly.Config, schema S
 		if t.indexes[ix.Tag], err = prolly.Empty(ctx, s, cfg); err != nil {
 			return nil, err
 		}
-	}
-	if err := t.writeRoot(ctx); err != nil {
-		return nil, err
 	}
 	return t, nil
 }
@@ -130,18 +139,6 @@ func openMap(ctx context.Context, s chunk.ReadWriter, cfg prolly.Config, ir inde
 		return nil, fmt.Errorf("%w: a map of %d entries whose root record says %d", chunk.ErrCorrupt, m.Count(), ir.count)
 	}
 	return m, nil
-}
-
-// WithSchema rewrites the table under a new schema, matching columns by tag
-// (a rename costs the catalog alone), and returns it; the table itself is
-// unchanged. A column added is NULL in every row and must be nullable; a
-// column dropped takes its cells; an index added is built; a type may widen
-// (int2 to int4 to int8, float4 to float8, varchar to a longer varchar or to
-// text) and the values follow. A value that does not fit the new schema, a
-// type that cannot take the values, and any change to the primary key are
-// refused. (Stub.)
-func (t *Table) WithSchema(ctx context.Context, next Schema) (*Table, error) {
-	return nil, errors.New("table: WithSchema is not implemented")
 }
 
 // Schema is the table's schema.

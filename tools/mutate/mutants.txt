@@ -417,3 +417,31 @@ find: for _, ix := range rec.indexes {\n\t\tif err := prolly.Walk(ctx, r, m.Conf
 replace: for range rec.indexes {\n\t}
 pkg: ./model/table
 run: ^TestContract$
+
+id: table-withschema-keeps-the-primary-key
+file: model/table/alter.go
+find: if !slices.Equal(next.PrimaryKey, t.schema.PrimaryKey) {
+replace: if !slices.Equal(next.PrimaryKey, t.schema.PrimaryKey) && false {
+pkg: ./model/table
+run: ^TestATableTakesANewSchema$
+
+id: table-withschema-added-column-is-nullable
+file: model/table/alter.go
+find: if !c.Nullable {\n\t\t\t\treturn fmt.Errorf("%w: column %q is added NOT NULL
+replace: if !c.Nullable && false {\n\t\t\t\treturn fmt.Errorf("%w: column %q is added NOT NULL
+pkg: ./model/table
+run: ^TestATableTakesANewSchema$
+
+id: table-withschema-widens-only
+file: model/table/alter.go
+find: return fmt.Errorf("%w: column %q cannot change from %s to %s", ErrSchema, from.Name, from.Type, to.Type)
+replace: return nil
+pkg: ./model/table
+run: ^TestATableTakesANewSchema$
+
+id: table-withschema-values-follow-a-widened-type
+file: model/table/alter.go
+find: case int32:\n\t\treturn int64(x), nil
+replace: case int32:\n\t\treturn x, nil
+pkg: ./model/table
+run: ^TestATableTakesANewSchema$
