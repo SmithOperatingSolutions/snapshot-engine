@@ -19,7 +19,8 @@ func TestAProgramDrivesADatabaseThroughTheEngineAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	blobs, err := engine.DiskBlobs(t.TempDir())
+	dir := t.TempDir()
+	blobs, err := engine.DiskBlobs(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,6 +144,9 @@ func TestAProgramDrivesADatabaseThroughTheEngineAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if o.Blobs, err = engine.DiskBlobs(dir); err != nil { // a fresh process opens the same directory
+		t.Fatal(err)
+	}
 	db, err = engine.Open(ctx, o)
 	if err != nil {
 		t.Fatalf("Open again from disk: %v", err)

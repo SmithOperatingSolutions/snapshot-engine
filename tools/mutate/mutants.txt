@@ -1783,3 +1783,25 @@ find: if h, err := hash.Parse(name); err == nil {\n\t\tc, err := s.db.r.ReadComm
 replace: if h, err := hash.Parse(name); err == nil && false {\n\t\tc, err := s.db.r.ReadCommit(ctx, s.p, h)
 pkg: ./engine
 run: ^TestAReaderOfOneBranchNamesCommitsByHash$
+
+# engine constructors
+id: engine-disk-blobs-opens-what-is-there
+file: engine/backends.go
+find: st, err := local.Open(dir, local.Options{})\n\tif errors.Is(err, local.ErrNotAStore) {
+replace: st, err := local.Create(dir, local.Options{})\n\tif errors.Is(err, local.ErrNotAStore) {
+pkg: ./e2e
+run: ^TestAProgramDrivesADatabaseThroughTheEngineAlone$
+
+id: engine-allow-all-allows
+file: engine/backends.go
+find: func AllowAll() Authorizer { return auth.AllowAll{} }
+replace: func AllowAll() Authorizer { return auth.DenyAll{} }
+pkg: ./e2e
+run: ^TestAProgramDrivesADatabaseThroughTheEngineAlone$
+
+id: engine-parse-document-parses
+file: engine/backends.go
+find: n, err := document.Parse(text)
+replace: n, err := document.Parse([]byte("{}"))
+pkg: ./e2e
+run: ^TestAProgramDrivesADatabaseThroughTheEngineAlone$
