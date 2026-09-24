@@ -518,21 +518,35 @@ run: ^TestWriteRefusesABadIDOrRecord$
 
 id: document-merge-conflicts-are-not-repaired
 file: model/document/document.go
-find: if len(r.Conflicts) > 0 {\n\t\treturn nil, false, fields(r.Conflicts)\n\t}
-replace: if false {\n\t\treturn nil, false, fields(r.Conflicts)\n\t}
+find: if len(r.Conflicts) > 0 {\n\t\tcs := make([]model.Conflict, 0, len(r.Conflicts))
+replace: if false {\n\t\tcs := make([]model.Conflict, 0, len(r.Conflicts))
 pkg: ./model/document
 run: ^TestOneFieldChangedTwoWaysConflictsAtThatRecordNamingTheField$
 
 id: document-merge-conflicts-name-the-field
 file: model/document/document.go
-find: parts = append(parts, "field "+c.Path.String()+": "+c.Reason)
-replace: parts = append(parts, "field: "+c.Reason)
+find: cs = append(cs, model.Conflict{Location: Locate(id, c.Path), Reason: c.Reason})
+replace: cs = append(cs, model.Conflict{Location: Locate(id, nil), Reason: c.Reason})
 pkg: ./model/document
 run: ^TestOneFieldChangedTwoWaysConflictsAtThatRecordNamingTheField$
 
 id: document-merge-is-by-field-only-for-records-changed-in-place
 file: model/document/document.go
-find: if reason == "" || ours.Kind != prolly.Modified || theirs.Kind != prolly.Modified {
-replace: if reason == "" {
+find: if ours.Kind != prolly.Modified || theirs.Kind != prolly.Modified {
+replace: if false {
 pkg: ./model/document
 run: ^TestOneFieldChangedTwoWaysConflictsAtThatRecordNamingTheField$
+
+id: document-a-bad-record-aborts-the-merge
+file: model/document/document.go
+find: return mapobject.Decision{}, fmt.Errorf("record %q: %w", id, err)
+replace: return mapobject.Decision{Conflicts: []model.Conflict{{Reason: err.Error()}}}, nil
+pkg: ./model/document
+run: ^TestEachFieldConflictIsLocatedAndABadRecordAbortsTheMerge$
+
+id: document-a-location-has-an-id
+file: model/document/document.go
+find: if r.Err() == nil && len(id) == 0 {
+replace: if r.Err() == nil && len(id) < 0 {
+pkg: ./model/document
+run: ^TestLocationsRoundTripAndForgeriesAreRefused$

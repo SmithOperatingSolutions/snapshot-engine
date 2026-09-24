@@ -1,15 +1,16 @@
 package document
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/hash"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/model"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/prolly"
+	"github.com/SmithOperatingSolutions/snapshot-core/core/wire"
 	"github.com/SmithOperatingSolutions/snapshot-core/model/mapobject"
 
 	"github.com/SmithOperatingSolutions/snapshot-engine/merge"
@@ -150,52 +151,75 @@ func (m Model) Diff(ctx context.Context, from, to model.Root, r chunk.Reader) (m
 // the field; a record deleted on one side and changed on the other, or
 // added differently on both, is a conflict (mapobject.Disagreement).
 func (m Model) Merge(ctx context.Context, base, ours, theirs model.Root, rw chunk.ReadWriter) (model.MergeResult, error) {
-	return spec(m.Config).Merge(ctx, base, ours, theirs, rw, resolve)
+	return spec(m.Config).MergeWith(ctx, base, ours, theirs, rw, decide)
 }
 
-// resolve decides a record both sides changed from base: a Tree merge of
-// the three records when both sides changed it in place; the default rule
-// otherwise (equal, both deleted, deleted against changed, added twice).
-func resolve(id []byte, ours, theirs prolly.Change) (value []byte, put bool, reason string) {
-	value, put, reason = mapobject.Disagreement(id, ours, theirs)
-	if reason == "" || ours.Kind != prolly.Modified || theirs.Kind != prolly.Modified {
-		return value, put, reason
+// decide decides a record both sides changed from base: a Tree merge of
+// the three records when both sides changed it in place, each field
+// conflict located at the record and the field; the default rule otherwise
+// (equal, both deleted, deleted against changed, added twice), a conflict
+// at the record as a whole. A record that does not decode aborts the merge.
+func decide(id []byte, ours, theirs prolly.Change) (mapobject.Decision, error) {
+	value, put, reason := mapobject.Disagreement(id, ours, theirs)
+	if reason == "" {
+		return mapobject.Decision{Value: value, Put: put}, nil
+	}
+	if ours.Kind != prolly.Modified || theirs.Kind != prolly.Modified {
+		return mapobject.Decision{Conflicts: []model.Conflict{{Location: Locate(id, nil), Reason: reason}}}, nil
 	}
 	var records [3]merge.Node
 	for i, frame := range [][]byte{ours.From, ours.To, theirs.To} {
 		var err error
 		if records[i], err = DecodeRecord(frame); err != nil {
-			return nil, false, "a record that does not decode: " + err.Error()
+			return mapobject.Decision{}, fmt.Errorf("record %q: %w", id, err)
 		}
 	}
 	r := merge.Tree(records[0], records[1], records[2], merge.TreeOptions{})
 	if len(r.Conflicts) > 0 {
-		return nil, false, fields(r.Conflicts)
+		cs := make([]model.Conflict, 0, len(r.Conflicts))
+		for _, c := range r.Conflicts {
+			cs = append(cs, model.Conflict{Location: Locate(id, c.Path), Reason: c.Reason})
+		}
+		return mapobject.Decision{Conflicts: cs}, nil
 	}
 	frame, err := EncodeRecord(r.Value)
 	if err != nil {
-		return nil, false, "the merged record is not a document: " + err.Error()
+		return mapobject.Decision{}, fmt.Errorf("record %q merged to what is not a document: %w", id, err)
 	}
-	return frame, true, ""
-}
-
-// fields is a conflict's reason for a record: each conflicting field's
-// path and why.
-func fields(cs []merge.Conflict) string {
-	parts := make([]string, 0, len(cs))
-	for _, c := range cs {
-		parts = append(parts, "field "+c.Path.String()+": "+c.Reason)
-	}
-	return strings.Join(parts, "; ")
+	return mapobject.Decision{Value: frame, Put: true}, nil
 }
 
 // Locate is the location of a conflict in a collection: the record's id
 // and, for a conflict inside the record, the path of the field, empty for
-// the record as a whole. (Stub.)
-func Locate(id []byte, path merge.Path) []byte { return nil }
+// the record as a whole. Each part is length-prefixed (a uvarint), so an
+// id may hold any bytes and a field name any text. A change's location
+// (Diff) is the bare id: a change is a record.
+func Locate(id []byte, path merge.Path) []byte {
+	var w wire.Writer
+	w.LenBytes(id)
+	for _, seg := range path {
+		w.LenBytes([]byte(seg))
+	}
+	return w.Bytes()
+}
 
-// ParseLocation is Locate's inverse; it refuses what Locate did not write.
-// (Stub.)
+// ParseLocation is Locate's inverse; it refuses what Locate did not write:
+// an empty or oversized id, a path deeper than MaxDepth, a truncated part,
+// a varint that is not minimal.
 func ParseLocation(loc []byte) (id []byte, path merge.Path, err error) {
-	return nil, nil, fmt.Errorf("%w: ParseLocation is not implemented", ErrID)
+	r := wire.NewReader(loc)
+	id = r.LenBytes(MaxIDSize)
+	if r.Err() == nil && len(id) == 0 {
+		return nil, nil, fmt.Errorf("%w: a location with an empty id", ErrID)
+	}
+	for r.Err() == nil && r.Remaining() > 0 {
+		if len(path) == MaxDepth {
+			return nil, nil, fmt.Errorf("%w: a location deeper than %d fields", ErrID, MaxDepth)
+		}
+		path = append(path, string(r.LenBytes(MaxDocument)))
+	}
+	if err := r.Done(); err != nil {
+		return nil, nil, fmt.Errorf("%w: a location: %w", ErrID, err)
+	}
+	return bytes.Clone(id), path, nil
 }
