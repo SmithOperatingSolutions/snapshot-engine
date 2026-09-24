@@ -146,5 +146,5 @@ func (m Model) Diff(ctx context.Context, from, to model.Root, r chunk.Reader) (m
 // conflict at that key (mapobject.Disagreement). Further value kinds bring
 // their own resolver (E3).
 func (m Model) Merge(ctx context.Context, base, ours, theirs model.Root, rw chunk.ReadWriter) (model.MergeResult, error) {
-	return spec(m.Config).Merge(ctx, base, ours, theirs, rw, nil)
+	return spec(m.Config).Merge(ctx, base, ours, theirs, rw, resolve)
 }

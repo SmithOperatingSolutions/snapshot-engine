@@ -628,3 +628,66 @@ find: w.U64(uint64(v.Counter))
 replace: w.U64(uint64(v.Counter) + 1)
 pkg: ./model/kv
 run: ^TestKindFramesAreTheDocumentedEncodings$
+
+id: kv-resolve-counters-add-both-deltas
+file: model/kv/resolve.go
+find: merged = Value{Kind: Counter, Counter: merge.Counter(base.Counter, o.Counter, th.Counter)}
+replace: merged = Value{Kind: Counter, Counter: o.Counter}
+pkg: ./model/kv
+run: ^TestACounterIncrementedOnTwoBranchesMergesToTheSum$
+
+id: kv-resolve-equal-counter-changes-both-count
+file: model/kv/resolve.go
+find: (o.Kind != Counter && bytes.Equal(ours.To, theirs.To))
+replace: bytes.Equal(ours.To, theirs.To)
+pkg: ./model/kv
+run: ^TestACounterIncrementedOnTwoBranchesMergesToTheSum$
+
+id: kv-resolve-sets-merge-observed-remove
+file: model/kv/resolve.go
+find: merged = Value{Kind: Set, Members: fromMembers(merge.Set(toMembers(base.Members), toMembers(o.Members), toMembers(th.Members)))}
+replace: merged = Value{Kind: Set, Members: o.Members}
+pkg: ./model/kv
+run: ^TestASetAddedToAndRemovedFromKeepsTheObservedRemoveRule$
+
+id: kv-resolve-hash-per-field
+file: model/kv/resolve.go
+find: merged, reason = mergeHash(base, o, th)
+replace: merged, reason = o, ""
+pkg: ./model/kv
+run: ^TestAHashMergesPerField$
+
+id: kv-resolve-hash-field-conflicts
+file: model/kv/resolve.go
+find: if !r.Clean() {\n\t\t\tconflicts = append(conflicts, fmt.Sprintf("field %q: %s", n, r.Conflicts[0].Reason))\n\t\t\tcontinue\n\t\t}
+replace: if !r.Clean() && false {\n\t\t\tconflicts = append(conflicts, fmt.Sprintf("field %q: %s", n, r.Conflicts[0].Reason))\n\t\t\tcontinue\n\t\t}
+pkg: ./model/kv
+run: ^TestAHashMergesPerField$
+
+id: kv-resolve-sorted-set-per-member
+file: model/kv/resolve.go
+find: merged, reason = mergeSortedSet(base, o, th)
+replace: merged, reason = o, ""
+pkg: ./model/kv
+run: ^TestASortedSetKeepsItsOrderAcrossAMerge$
+
+id: kv-resolve-sequence-by-position
+file: model/kv/resolve.go
+find: merged, reason = mergeSequence(base, o, th)
+replace: merged, reason = o, ""
+pkg: ./model/kv
+run: ^TestASequenceWithConcurrentInsertsMergesDeterministically$
+
+id: kv-resolve-kinds-must-agree
+file: model/kv/resolve.go
+find: if o.Kind != th.Kind {
+replace: if o.Kind != th.Kind && false {
+pkg: ./model/kv
+run: ^TestAKindChangedOnOneSideConflicts$
+
+id: kv-resolve-a-deletion-follows-disagreement
+file: model/kv/resolve.go
+find: if ours.Kind == prolly.Removed || theirs.Kind == prolly.Removed {
+replace: if false {
+pkg: ./model/kv
+run: ^TestMergeIsThreeWayPerKey$
