@@ -90,22 +90,22 @@ run: ^TestTreesMergeByPath$
 
 id: kv-encode-refuses-an-unknown-kind
 file: model/kv/value.go
-find: if v.Kind != Bytes {
-replace: if v.Kind != Bytes && false {
+find: default:\n\t\treturn nil, fmt.Errorf("%w: kind %d", ErrValue, v.Kind)
+replace: default:\n\t\treturn w.Bytes(), nil
 pkg: ./model/kv
 run: ^TestAFrameThatIsNotAValueIsRefused$
 
 id: kv-encode-caps-the-payload
 file: model/kv/value.go
-find: if len(v.Bytes) > MaxValueSize {
-replace: if len(v.Bytes) > MaxValueSize && false {
+find: if len(f)-1 > MaxValueSize {
+replace: if len(f)-1 > MaxValueSize && false {
 pkg: ./model/kv
 run: ^TestAFrameThatIsNotAValueIsRefused$
 
 id: kv-decode-refuses-an-unknown-kind
 file: model/kv/value.go
-find: if Kind(b[0]) != Bytes {
-replace: if Kind(b[0]) != Bytes && false {
+find: default:\n\t\treturn Value{}, fmt.Errorf("%w: kind %d", ErrValue, b[0])
+replace: default:\n\t\treturn v, nil
 pkg: ./model/kv
 run: ^TestAFrameThatIsNotAValueIsRefused$
 
