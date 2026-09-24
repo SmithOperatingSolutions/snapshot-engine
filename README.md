@@ -12,9 +12,13 @@ language over a small number of data shapes. The shapes live here, once.
 The protocols (Postgres, MySQL, Mongo, Redis, filesystems) are adapters, one
 repository each, and import only this module's `engine` package.
 
-**Status:** scaffold. The layers, scope and order are in
+**Status:** the models (tables, key-value maps, document collections) and
+the merge library they share are done, and so is the engine API: sessions,
+transactions with snapshot isolation and optimistic commit through the
+models' merge, per-table grants and protected branches, errors scrubbed to
+a correlation id. The layers, scope and order are in
 [`docs/specs/engine-layers.md`](docs/specs/engine-layers.md); the milestones
-and every checklist item in [`docs/PROGRESS.md`](docs/PROGRESS.md).
+and every checklist item with its test in [`docs/PROGRESS.md`](docs/PROGRESS.md).
 
 ## Layout
 

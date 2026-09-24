@@ -13,7 +13,7 @@ collection, and the Engine Spec's L0 to L3 checklists and security rows.
 See [snapshot-core's PROGRESS](https://github.com/SmithOperatingSolutions/snapshot-core/blob/main/docs/PROGRESS.md).
 The engine takes the core by tag (`go.mod`) and never tracks its items here.
 
-**Updated 2026-09-24** · E1 and E2 done on main; E3 and E5 done on `core-next`, which waits for the core's next tag; E0 done but for the first PR; E4, the engine API, next
+**Updated 2026-09-24** · E1 to E5 done: E1 and E2 on main, E3, E4 and E5 on `core-next`, which waits for the core's next tag; E0 done but for the first PR
 
 ## Milestones
 
@@ -23,7 +23,7 @@ The engine takes the core by tag (`go.mod`) and never tracks its items here.
 | **E1 Merge library** | ✅ Done | `merge/`: `Scalar`, `Counter`, `Set` (observed-remove over write tags), `Sequence` (diff3 over element keys), `Tree` (a JSON-like `Node` merged by path, arrays as sequences, counter paths by option); conflicts as values with a path and a reason, never repaired; 97% covered, 11 mutants | Every policy has a property test: deterministic, one-sided change returns that side, symmetric (`TestScalarAndCounterProperties`, `TestSetProperties`, `TestSequenceProperties`, `TestTreeProperties`) |
 | **E2 Tables** | ✅ Done | `model/table`: catalog with tagged columns, order-preserving cell encoding for every v1 type, primary and index maps, a hidden row id, the row API, `WithSchema`; diff per row then cell; merge of schemas by column tag then of rows under the merged schema, cells through the merge library; three decoders, three fuzz targets; 37 mutants, 90% covered | Every E2 item below green ✅ |
 | **E3 Key-value** | ✅ Done (on `core-next`) | `model/kv` whole: bytes, counter, set (write tags), hash, sorted set, sequence, each a canonical bounded frame with a fuzz target and a merge policy through the merge library; conflicts located at the key and the field or member; 93% covered | Every E3 item below green ✅ |
-| **E4 Engine API** | | `engine/`: `Database`, `Session`, `Txn`; snapshot isolation; optimistic commit through the models' merge; authorization on every call; commit, branch, merge, diff, log | Every E4 item below green; `e2e/` drives a repository through `engine/` alone |
+| **E4 Engine API** | ✅ Done (on `core-next`) | `engine/`: `Database` (Create, Open, the geometry check), `Session` (checkout held through the core, branches, objects, commit, merge with located conflicts, abort, diff, log), `Txn` with snapshot isolation and optimistic commit through the models' merge (bounded retry, `ErrSerialization`), handles for tables, kv maps and collections with read-your-writes; `Grants` (read, write, commit, merge, branch-admin, admin per database, branch and object; protected branches); every error scrubbed to the engine error and a correlation id; what a program needs re-exported so it imports `engine/` alone; 92% covered | Every E4 item below green ✅; `e2e/` drives a database through `engine/` alone, held to it by depguard |
 | **E5 Documents** | ✅ Done (on `core-next`, which waits for the core's next tag) | `model/document`: records by id as canonical JSON behind a versioned frame, the model's own bounded JSON parser, diff per record, merge by field path through the merge library on the core's `model/mapobject`; 21 mutants, 92% covered | Every E5 item below green ✅ |
 
 Adapters (RESP, Mongo, MySQL, pgwire, filesystems) are separate repositories
@@ -71,17 +71,18 @@ with their own progress; they import `engine/` alone.
 - [x] `model/contract` green for every kind (`TestContract`); a kind changed on one side conflicts (`TestAKindChangedOnOneSideConflicts`); locations (`TestALocationNamesAKeyAndWhatIsBelowIt`); a frame that does not decode mid-merge is an error (`TestAFrameThatDoesNotDecodeMidMergeIsAnError`); a Redis-shaped workload of every kind branches and merges through a repository (`e2e`: `TestARedisShapedWorkloadBranchesAndMerges`).
 
 ### E4 Engine API (`engine/`; the Engine Spec's L4 transactions and authorization)
-- [ ] `Open(ctx, principal)` on a branch; `Checkout`, `Branch`, `Log`.
-- [ ] A transaction reads the working set as of `Begin` and sees none of another transaction's writes (snapshot isolation).
-- [ ] Two txns update different rows concurrently: both commit.
-- [ ] Two txns update the same cell: the second commit fails with a serialization conflict; its changes are absent; nothing partial reached the working set.
-- [ ] Session `Commit` is one VCS commit; `Merge(from)` merges branches through the models and reports conflicts per object.
-- [ ] `Diff(from, to, object)` yields a model's change iterator for a table, a kv map, a document collection.
-- [ ] A principal without `write` on `main` gets `ErrPermissionDenied` on insert, and the working set hash is unchanged.
-- [ ] Session authorization is re-checked per call: revoking a grant mid-session blocks the next call.
-- [ ] A protected branch refuses direct writes and requires `merge`.
-- [ ] Errors to callers carry no keys, values or rows (log-scrubbing test).
-- [ ] `e2e/`: a repository created, written, branched, merged and read back through `engine/` alone, with the models registered by the caller.
+- [x] `Open(ctx, principal)` on a branch; `Checkout`, `Branch`, `Log` (`TestADatabaseIsCreatedAndOpenedAgain`, `TestASessionIsRefusedWhereItCannotServe`, `TestBranchesAreCreatedCheckedOutAndDeleted`, `TestLogListsCommitsNewestFirst`; a branch a session is on cannot be deleted from under it, `TestABranchASessionIsOnCannotBeDeleted`).
+- [x] A transaction reads the working set as of `Begin` and sees none of another transaction's writes (snapshot isolation) (`TestATransactionReadsItsSnapshotAndItsOwnWrites`, `TestAScanSeesWritesNotYetRead`).
+- [x] Two txns update different rows concurrently: both commit (`TestTwoTransactionsOnDifferentRowsBothCommit`; kv keys and document fields too, `TestTransactionsOnOneKVMapMergeByKey`, `TestTransactionsOnOneCollectionMergeByField`).
+- [x] Two txns update the same cell: the second commit fails with a serialization conflict; its changes are absent; nothing partial reached the working set (`TestTwoTransactionsOnTheSameCellSerialize`; a swap lost to a racing commit is retried, bounded, `TestACommitThatLosesTheSwapTriesAgain`; a failing backend writes nothing, `TestABackendFailingACommitWritesNothing`).
+- [x] Session `Commit` is one VCS commit; `Merge(from)` merges branches through the models and reports conflicts per object (`TestCommitRecordsTheWorkingSet`, `TestMergeCommitsACleanMergeAndReportsConflicts`, `TestMergeConflictsSayWhy`, `TestAMergeThatCannotBeCommittedChangesNothing`).
+- [x] `Diff(from, to, object)` yields a model's change iterator for a table, a kv map, a document collection (`TestDiffYieldsTheModelsChanges`, `TestAnObjectOneSideHoldsIsEveryPartAdded`).
+- [x] A principal without `write` on `main` gets `ErrPermissionDenied` on insert, and the working set hash is unchanged (`TestACommitWithoutWriteIsDeniedAndChangesNothing`, `TestACommitWithoutWriteOnMainIsDenied`; each version operation needs its grant, `TestEachVersionOperationNeedsItsGrant`).
+- [x] Session authorization is re-checked per call: revoking a grant mid-session blocks the next call (`TestARevokedGrantBlocksTheNextCall`, `TestAGrantRevokedMidSessionBlocksTheNextCall`).
+- [x] A protected branch refuses direct writes and requires `merge` (`TestAProtectedMainTakesMergesNotDirectWrites`, over the core's `Commit` and `Merge` actions).
+- [x] Grants are per branch and per table: read and write on one table reach that table only (`TestWriteOnOneTableWritesThatTableOnly`, `TestReadIsGrantedPerTable`; the mapping, `TestGrantsMapTheCoresQuestions`, `TestGrantsDenyWhatTheyDoNotKnow`, `TestAGrantThatNamesNothingIsRefused`, `TestRevokeAndProtect`, `TestGrantsAreSafeForConcurrentUse`).
+- [x] Errors to callers carry no keys, values or rows (log-scrubbing test) (`TestErrorsToCallersAreScrubbed`, `TestTheAPIsErrorsCarryNoNames`, `TestTransactionErrorsCarryNoData`; a backend's failure is `ErrInternal` with the fault in the log, `TestABackendFailingAReadFailsTheCall`).
+- [x] `e2e/`: a database created, written, branched, merged and read back through `engine/` alone (`e2e`: `TestAProgramDrivesADatabaseThroughTheEngineAlone`; depguard's `a-program-sees-the-engine-alone`).
 
 ### E5 Documents (`model/document`)
 - [x] A record's fields diff by path; two writers on different fields of one record both land (`TestMergeCombinesFieldsOfOneRecord`, nested fields too; `e2e`: `TestBranchesEditingDifferentFieldsOfOneRecordMerge`; diff per record, `TestDiffIsOneChangePerRecord`).
@@ -114,4 +115,9 @@ with their own progress; they import `engine/` alone.
 | kv's kind resolver | A shortcut that took two equal changes as one made two equal counter decrements count once | Only counters treat equal changes as two changes (`TestACounterIncrementedOnTwoBranchesMergesToTheSum`) |
 | the document's canonical text | `merge.Node.Canonical()` quotes strings the Go way (`\x..`), which is not JSON | The model owns its canonical text: strict JSON, one spelling per value (DESIGN §3) |
 | redcheck, on the branch over an untagged core | A red whose package needs `model/mapobject` does not build in redcheck's scratch worktree, which has no `go.work`: kv's and document's reds on `core-next` block there | Verified by hand under the workspace: every such red fails on an assertion; judged in full once `go.mod` moves to the core's next tag |
+| the engine's grants (E4) | The core asks about reads per branch only, so the Engine Spec's per-table read was unenforceable by an authorizer alone | The engine asks Read on `path:<branch>:<object>` itself when it opens, diffs or lists an object (`TestReadIsGrantedPerTable`) |
+| resolving a ref (E4) | A commit hash was tried first as a branch's name, a lookup a reader of one branch is denied, and the denial ended the resolution: such a reader could not name a commit by hash | A full commit hash is read as a commit first (`TestAReaderOfOneBranchNamesCommitsByHash`) |
+| sessions (E4) | A session did not hold its branch through the core's checkout, so another session could delete it; a principal with Merge but not Commit could leave a clean merge half-applied | The session holds the checkout (`TestABranchASessionIsOnCannotBeDeleted`); a merge refused at its commit is undone (`TestAMergeThatCannotBeCommittedChangesNothing`) |
+| scrubbing (E4) | Once errors were scrubbed, a fault test that asked only for "an error" could no longer tell a failed working-set read from the failure that followed it | Fault tests require `ErrInternal` with the injected fault itself in the log |
+| two table mutants (NaN, negative numerics) | Killed only when the byte-order property drew the right value: Go's `math.NaN()` already sorts above +Inf, so the NaN guard was reached only by a negative or other-payload NaN | Fixed cases on every run (`TestNaNSortsAboveEveryNumber`, `TestNegativeNumericsOrderByTheirDigits`) |
 | redcheck, on a rename | A `test:` commit whose rename touched an existing test file was blocked: redcheck judges every test the commit changed, and those passed without the change | Renames go in a `refactor:` commit of their own; CONTRIBUTING says so |
