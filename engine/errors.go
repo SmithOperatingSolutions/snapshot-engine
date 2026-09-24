@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -52,8 +54,44 @@ func (e *Error) Error() string { return e.Kind.Error() + " [ref " + e.Correlatio
 // Unwrap is the engine error, so errors.Is matches it.
 func (e *Error) Unwrap() error { return e.Kind }
 
-// scrub is what the API returns in place of err. (Stub.)
-func scrub(ctx context.Context, l Logger, err error) error { return err }
+// callerErrors are the engine errors a caller may be shown, most specific
+// first.
+var callerErrors = []error{ErrPermissionDenied, ErrSerialization, ErrNotFound, ErrExists, ErrWrongKind, ErrInvalid, ErrMergeInProgress, ErrClosed}
+
+// scrub is what the API returns in place of err: the engine error it
+// matches (ErrInternal when none) and a fresh correlation id, the details
+// logged under the id. A cancelled or expired context is returned as it
+// is: it carries nothing of the data.
+func scrub(ctx context.Context, l Logger, err error) error {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	var e *Error
+	if errors.As(err, &e) && err == error(e) { // scrubbed already
+		return err
+	}
+	kind := ErrInternal
+	for _, k := range callerErrors {
+		if errors.Is(err, k) {
+			kind = k
+			break
+		}
+	}
+	id := correlation()
+	if l != nil {
+		l.Log(ctx, id, err.Error())
+	}
+	return &Error{Kind: kind, Correlation: id}
+}
+
+// correlation is a fresh id: 8 random bytes in hex.
+func correlation() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil { // crypto/rand does not fail on the platforms Go supports
+		return "0000000000000000"
+	}
+	return hex.EncodeToString(b[:])
+}
 
 // errNotImplemented is what a stub returns while E4 is built.
 var errNotImplemented = errors.New("engine: not implemented")

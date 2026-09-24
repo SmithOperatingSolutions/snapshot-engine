@@ -748,3 +748,25 @@ find: case errors.Is(err, auth.ErrDenied):\n\t\tto = ErrPermissionDenied
 replace: case errors.Is(err, auth.ErrDenied):\n\t\tto = ErrInvalid
 pkg: ./engine
 run: ^TestASessionIsRefusedWhereItCannotServe$
+
+# engine errors
+id: engine-scrub-logs-the-details
+file: engine/errors.go
+find: if l != nil {\n\t\tl.Log(ctx, id, err.Error())\n\t}
+replace: if l != nil && false {\n\t\tl.Log(ctx, id, err.Error())\n\t}
+pkg: ./engine
+run: ^TestErrorsToCallersAreScrubbed$
+
+id: engine-scrub-keeps-the-engine-error
+file: engine/errors.go
+find: if errors.Is(err, k) {\n\t\t\tkind = k
+replace: if errors.Is(err, k) && false {\n\t\t\tkind = k
+pkg: ./engine
+run: ^TestErrorsToCallersAreScrubbed$
+
+id: engine-scrub-passes-a-cancelled-context
+file: engine/errors.go
+find: if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+replace: if err == nil {
+pkg: ./engine
+run: ^TestErrorsToCallersAreScrubbed$
