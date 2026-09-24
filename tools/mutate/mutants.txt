@@ -1606,3 +1606,94 @@ find: \tif err := c.flush(ctx); err != nil {\n\t\treturn err\n\t}\n\trs, err := 
 replace: \tif err := error(nil); err != nil {\n\t\treturn err\n\t}\n\trs, err := c.c.Scan(ctx, from)
 pkg: ./engine
 run: ^TestAScanSeesWritesNotYetRead$
+
+id: engine-txn-faults-begin-surfaces-an-unreadable-working-set
+file: engine/txn.go
+find: ws, err := s.db.r.WorkingSet(ctx, s.p, s.branch)\n\tif err != nil {
+replace: ws, err := s.db.r.WorkingSet(ctx, s.p, s.branch)\n\tif err != nil && false {
+pkg: ./engine
+run: ^TestABackendFailingAReadFailsTheCall$
+
+id: engine-txn-faults-commit-surfaces-an-unreadable-merge
+file: engine/txn.go
+find: theirs, err := r.Namespace(ctx, cur.Working)\n\t\t\tif err != nil {
+replace: theirs, err := r.Namespace(ctx, cur.Working)\n\t\t\tif err != nil && false {
+pkg: ./engine
+run: ^TestABackendFailingACommitWritesNothing$
+
+id: engine-txn-faults-commit-surfaces-a-failed-flush
+file: engine/txn.go
+find: \t\tif err := o.h.flush(ctx); err != nil {\n\t\t\treturn nil, err
+replace: \t\tif err := o.h.flush(ctx); err != nil && false {\n\t\t\treturn nil, err
+pkg: ./engine
+run: ^TestABackendFailingACommitWritesNothing$
+
+id: engine-txn-faults-a-table-that-cannot-open-fails
+file: engine/txn.go
+find: tb, err := table.Open(ctx, t.s.db.r.Chunks(), t.s.db.models.table.Config, ref.Root)\n\tif err != nil {
+replace: tb, err := table.Open(ctx, t.s.db.r.Chunks(), t.s.db.models.table.Config, ref.Root)\n\tif err != nil && false {
+pkg: ./engine
+run: ^TestABackendFailingAReadFailsTheCall$
+
+id: engine-txn-faults-a-kv-map-that-cannot-open-fails
+file: engine/txn.go
+find: m, err := kv.Open(ctx, t.s.db.r.Chunks(), t.s.db.models.kv.Config, ref.Root)\n\tif err != nil {
+replace: m, err := kv.Open(ctx, t.s.db.r.Chunks(), t.s.db.models.kv.Config, ref.Root)\n\tif err != nil && false {
+pkg: ./engine
+run: ^TestABackendFailingAReadFailsTheCall$
+
+id: engine-txn-faults-a-collection-that-cannot-open-fails
+file: engine/txn.go
+find: c, err := document.Open(ctx, t.s.db.r.Chunks(), t.s.db.models.document.Config, ref.Root)\n\tif err != nil {
+replace: c, err := document.Open(ctx, t.s.db.r.Chunks(), t.s.db.models.document.Config, ref.Root)\n\tif err != nil && false {
+pkg: ./engine
+run: ^TestABackendFailingAReadFailsTheCall$
+
+id: engine-txn-faults-a-table-read-surfaces-a-failure
+file: engine/txn.go
+find: row, ok, err := h.t.Get(ctx, key)\n\tif err != nil {
+replace: row, ok, err := h.t.Get(ctx, key)\n\tif err != nil && false {
+pkg: ./engine
+run: ^TestABackendFailingAReadFailsTheCall$
+
+id: engine-txn-faults-a-kv-read-surfaces-a-failure
+file: engine/txn.go
+find: v, ok, err := m.m.Get(ctx, key)\n\tif err != nil {
+replace: v, ok, err := m.m.Get(ctx, key)\n\tif err != nil && false {
+pkg: ./engine
+run: ^TestABackendFailingAReadFailsTheCall$
+
+id: engine-txn-faults-a-collection-read-surfaces-a-failure
+file: engine/txn.go
+find: n, ok, err := c.c.Get(ctx, id)\n\tif err != nil {
+replace: n, ok, err := c.c.Get(ctx, id)\n\tif err != nil && false {
+pkg: ./engine
+run: ^TestABackendFailingAReadFailsTheCall$
+
+id: engine-txn-faults-a-kv-flush-surfaces-a-failure
+file: engine/txn.go
+find: next, err := m.ed.Flush(ctx)\n\tif err != nil {
+replace: next, err := m.ed.Flush(ctx)\n\tif err != nil && false {
+pkg: ./engine
+run: ^TestABackendFailingAReadFailsTheCall$
+
+id: engine-txn-faults-a-collection-flush-surfaces-a-failure
+file: engine/txn.go
+find: next, err := c.ed.Flush(ctx)\n\tif err != nil {
+replace: next, err := c.ed.Flush(ctx)\n\tif err != nil && false {
+pkg: ./engine
+run: ^TestABackendFailingAReadFailsTheCall$
+
+id: engine-txn-faults-a-finished-transactions-kv-map-refuses
+file: engine/txn.go
+find: if err := m.tx.check(); err != nil {
+replace: if err := m.tx.check(); err != nil && false {
+pkg: ./engine
+run: ^TestFinishedAndDroppedKVAndCollectionsRefuse$
+
+id: engine-txn-faults-a-finished-transactions-collection-refuses
+file: engine/txn.go
+find: if err := c.tx.check(); err != nil {
+replace: if err := c.tx.check(); err != nil && false {
+pkg: ./engine
+run: ^TestFinishedAndDroppedKVAndCollectionsRefuse$
