@@ -392,24 +392,17 @@ run: ^TestDiffIsPerRowThenPerCell$
 
 id: table-cells-changed-differently-conflict
 file: model/table/model.go
-find: case sameCell(theirs, base):\n\t\treturn ours, false\n\t}\n\treturn nil, true
-replace: case sameCell(theirs, base):\n\t\treturn ours, false\n\t}\n\treturn ours, false
+find: case !r.Clean():\n\t\treturn nil, true, nil
+replace: case !r.Clean():\n\t\treturn ours, false, nil
 pkg: ./model/table
 run: ^TestMergeCombinesRowsAndCells$
 
 id: table-deleted-against-changed-conflicts
 file: model/table/model.go
-find: return []model.Conflict{{Location: bytes.Clone(co.Key), Reason: "deleted on one side and changed on the other"}}, nil
-replace: return nil, nil
+find: mg.conflict(bytes.Clone(co.Key), "deleted on one side and changed on the other")\n\t\treturn nil
+replace: return nil
 pkg: ./model/table
 run: ^TestMergeCombinesRowsAndCells$
-
-id: table-two-schemas-are-one-conflict
-file: model/table/model.go
-find: if !bytes.Equal(ts[0].catalog, ts[1].catalog) || !bytes.Equal(ts[0].catalog, ts[2].catalog) {
-replace: if false {
-pkg: ./model/table
-run: ^TestTablesOfDifferentSchemasAreOneConflict$
 
 id: table-walk-names-the-index-maps
 file: model/table/model.go
