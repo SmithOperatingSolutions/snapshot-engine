@@ -84,9 +84,31 @@ complemented with terminator `0xFF` for negatives, canonical text only;
 uuid 16 raw bytes. A cell is at most 1 MiB, a numeric at most 1000 digits.
 
 A *location* (diff and merge): the encoded key for a row; the encoded key
-then the column tag u16 big-endian for a cell; the literal `schema` for a
-schema conflict. Every model invents its own location encoding; this is
-table's.
+then the column tag u16 big-endian for a cell; `schema` for the schema as
+a whole, `schema/<tag>` for one column and `schema/index/<tag>` for one
+index. Every model invents its own location encoding; this is table's.
+
+*Merge.* The primary key may not change on either side against the base
+(rows are matched by keys encoded under the base's key): a conflict at
+`schema` before anything else. Equal catalogs take ours; a side whose
+catalog is the base's takes the other side's schema whole, so the merge
+identities hold and column order is the writer's. Otherwise columns merge
+by tag: the base's columns in the base's order, each attribute (name,
+type, nullability, length) a three-way scalar merge, a disagreement a
+conflict at `schema/<tag>`; a column dropped on one side goes unless the
+other side changed it or wrote to it (any row's cell for it changed, added
+rows included), a conflict at `schema/<tag>`; additions are appended in
+tag order, the same addition on both sides lands once, two different
+additions of one tag conflict. Indexes merge by tag the same way at
+`schema/index/<tag>`; an index whose columns are no longer all present is
+dropped. The merged schema must validate. Then ours is rewritten under it
+(`WithSchema`: renames are catalog-only, added columns must be nullable,
+dropped columns take their cells, indexes are rebuilt, types may widen
+int2→int4→int8, float4→float8, varchar→longer or text), theirs' rows are
+carried across (a value that does not fit is a conflict at the row), and
+rows merge per row then per cell, a cell a `merge.Scalar` over its
+encoding, a row added on one side read under a nullable copy of the
+column. With any conflict the result is ours, untouched.
 
 Still to land: the document record (E5).
 

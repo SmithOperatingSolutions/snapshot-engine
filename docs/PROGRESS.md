@@ -13,7 +13,7 @@ collection, and the Engine Spec's L0 to L3 checklists and security rows.
 See [snapshot-core's PROGRESS](https://github.com/SmithOperatingSolutions/snapshot-core/blob/main/docs/PROGRESS.md).
 The engine takes the core by tag (`go.mod`) and never tracks its items here.
 
-**Updated 2026-09-24** · E1 done; E0 done but for the first PR; E2 done but for the two schema-merge items, which wait on wiring table to the merge library
+**Updated 2026-09-24** · E1 and E2 done; E0 done but for the first PR; E3 and E5 built on the branch that waits for the core's next tag
 
 ## Milestones
 
@@ -21,7 +21,7 @@ The engine takes the core by tag (`go.mod`) and never tracks its items here.
 | --- | --- | --- | --- |
 | **E0 Foundations** | 🚧 (one item waits for the first PR) | The module on snapshot-core v0.1.0; the gates (fmt, vet, lint with the layer table, vuln, race, coverage, redcheck, mutants); `model/kv` at the bytes kind, passing the core's `model/contract` from outside the core, end to end through a repository; 23 mutants, 91% covered | A deliberately failing `test:` commit blocks a PR (first PR); a kv object round-trips through a repository and two branches setting different keys merge clean ✅ |
 | **E1 Merge library** | ✅ Done | `merge/`: `Scalar`, `Counter`, `Set` (observed-remove over write tags), `Sequence` (diff3 over element keys), `Tree` (a JSON-like `Node` merged by path, arrays as sequences, counter paths by option); conflicts as values with a path and a reason, never repaired; 97% covered, 11 mutants | Every policy has a property test: deterministic, one-sided change returns that side, symmetric (`TestScalarAndCounterProperties`, `TestSetProperties`, `TestSequenceProperties`, `TestTreeProperties`) |
-| **E2 Tables** | 🚧 (two items wait on the merge library) | `model/table`: catalog with tagged columns, order-preserving cell encoding for every v1 type, primary and index maps, a hidden row id, the row API, diff per row then cell, merge per row and cell with one schema; three decoders, three fuzz targets; 24 mutants, 91% covered | Every E2 item below green |
+| **E2 Tables** | ✅ Done | `model/table`: catalog with tagged columns, order-preserving cell encoding for every v1 type, primary and index maps, a hidden row id, the row API, `WithSchema`; diff per row then cell; merge of schemas by column tag then of rows under the merged schema, cells through the merge library; three decoders, three fuzz targets; 37 mutants, 90% covered | Every E2 item below green ✅ |
 | **E3 Key-value** | | `model/kv` whole: bytes, counter, set, hash, sorted set, sequence, each with its policy | Every E3 item below green |
 | **E4 Engine API** | | `engine/`: `Database`, `Session`, `Txn`; snapshot isolation; optimistic commit through the models' merge; authorization on every call; commit, branch, merge, diff, log | Every E4 item below green; `e2e/` drives a repository through `engine/` alone |
 | **E5 Documents** | | `model/document`: records by id, field-path diff and merge, a bounded parser for JSON input | Every E5 item below green |
@@ -57,9 +57,9 @@ with their own progress; they import `engine/` alone.
 - [x] Secondary index returns the same rows as a full scan with a filter; an index is updated with its primary map, never apart from it (`TestAnIndexReturnsWhatAScanWithAFilterReturns`; an index that drifted is refused, `TestAnIndexThatDriftedFromTheRowsIsRefused`).
 - [x] Writing a 300-char string into `varchar(255)` is rejected; nothing is written. Every value is validated against its column type; invalid input is refused, never coerced (`TestWritesThatDoNotFitAreRefusedAndWriteNothing`, `TestValuesThatDoNotFitAreRefused`).
 - [x] The catalog is a versioned record with a stable numeric tag per column; a forged or truncated catalog is refused (`TestTheCatalogIsTheDocumentedRecord`, `TestSchemasThatCannotBeATablesAreRefused`, `TestForgedCatalogsAreRefused`, `FuzzDecodeCatalog`); so is the root record (`TestTheRootIsTheDocumentedRecord`, `FuzzDecodeRoot`).
-- [ ] Rename a column on branch A, update a row on branch B, merge: data survives under the new name (waits on the merge library and the schema-merge rules).
+- [x] Rename a column on branch A, update a row on branch B, merge: data survives under the new name (`TestAColumnRenamedOnOneSideKeepsTheOthersEdits`, both orders, one root; independent compatible schema edits merge clean, deterministic and symmetric, `TestIndependentSchemaEditsMergeCleanAndSymmetric`; a table takes a new schema and keeps its rows, `TestATableTakesANewSchema`).
 - [x] Two branches change the same cell differently: a conflict on that cell alone; the rest of the table merges (`TestMergeCombinesRowsAndCells`; diff per row then cell, `TestDiffIsPerRowThenPerCell`, `TestByteCellsDiffByContent`).
-- [ ] Two branches change the schema incompatibly (drop a column and write to it): a schema conflict, no rows lost (this slice: two different schemas are one conflict at `schema`, `TestTablesOfDifferentSchemasAreOneConflict`).
+- [x] Two branches change the schema incompatibly (drop a column and write to it): a schema conflict, no rows lost (`TestSchemasMergeByTag`: dropped and written to, dropped and changed, added or renamed differently, a length or an index changed differently, the primary key changed, a NOT NULL column added; the result is ours untouched).
 - [x] `model/contract` green (`TestContract`); the walk reaches a long cell's stream (`TestWalkNamesALongCellsChunks`); store faults surface everywhere (`TestStoreFaultsAreReported`).
 
 ### E3 Key-value (`model/kv`)
