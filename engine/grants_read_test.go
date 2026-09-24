@@ -70,3 +70,28 @@ func TestReadIsGrantedPerTable(t *testing.T) {
 		t.Errorf("opening people after the grant was revoked = %v, want ErrPermissionDenied", err)
 	}
 }
+
+// A reader of one branch names commits by hash: a log from main's head
+// commit and a diff between it and itself resolve for a principal granted
+// read on main alone, as they do by the branch's name. (A hash was first
+// tried as a branch's name, a lookup such a reader is denied, and the
+// denial ended the resolution.)
+func TestAReaderOfOneBranchNamesCommitsByHash(t *testing.T) {
+	db, g := grantDB(t)
+	reader := engine.Principal{ID: "user:mainreader"}
+	if err := g.Grant(reader.ID, engine.BranchScope("main"), engine.PermRead); err != nil {
+		t.Fatal(err)
+	}
+	s := grantSession(t, db, reader, "main")
+	log, err := s.Log(ctx, "main", 1)
+	if err != nil || len(log) != 1 {
+		t.Fatalf("positive control: main's log by name = %v, %v", log, err)
+	}
+	head := engine.Ref(log[0].Hash.String())
+	if got, err := s.Log(ctx, head, 1); err != nil || len(got) != 1 || got[0].Hash != log[0].Hash {
+		t.Errorf("the log from main's head by its hash = %v, %v, want that commit", got, err)
+	}
+	if _, err := s.Diff(ctx, head, head, "people"); err != nil {
+		t.Errorf("a diff between main's head and itself by hash: %v", err)
+	}
+}
