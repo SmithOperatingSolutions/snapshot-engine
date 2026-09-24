@@ -740,8 +740,8 @@ run: ^TestASessionIsRefusedWhereItCannotServe$
 
 id: engine-a-session-needs-its-branch-and-read-access
 file: engine/database.go
-find: if _, err := d.r.Head(ctx, p, branch); err != nil { // checks the principal, the branch and read access\n\t\treturn nil, translate(err)\n\t}
-replace: if _, err := d.r.Head(ctx, p, branch); err != nil && false { // checks the principal, the branch and read access\n\t\treturn nil, translate(err)\n\t}
+find: co, err := d.r.Checkout(ctx, p, branch) // checks the principal, the branch and read access, and holds the branch\n\tif err != nil {
+replace: co, err := d.r.Checkout(ctx, p, branch) // checks the principal, the branch and read access, and holds the branch\n\tif err != nil && false {
 pkg: ./engine
 run: ^TestASessionIsRefusedWhereItCannotServe$
 
@@ -1073,8 +1073,8 @@ run: ^TestAClosedSessionRefusesEveryCall$
 
 id: session-checkout-moves-only-on-success
 file: engine/session.go
-find: if _, err := s.db.r.Head(ctx, s.p, branch); err != nil {\n\t\treturn translate(err)\n\t}\n\ts.branch = branch
-replace: if _, err := s.db.r.Head(ctx, s.p, branch); err != nil && false {\n\t\treturn translate(err)\n\t}\n\ts.branch = branch
+find: co, err := s.db.r.Checkout(ctx, s.p, branch)\n\tif err != nil {\n\t\treturn translate(err)\n\t}
+replace: co, err := s.db.r.Checkout(ctx, s.p, branch)\n\tif err != nil && false {\n\t\treturn translate(err)\n\t}
 pkg: ./engine
 run: ^TestBranchesAreCreatedCheckedOutAndDeleted$
 
