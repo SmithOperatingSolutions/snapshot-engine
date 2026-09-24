@@ -57,8 +57,40 @@ type (
 	Key    = table.Key
 )
 
+// The table model's column types.
+const (
+	TypeBool        = table.TypeBool
+	TypeInt2        = table.TypeInt2
+	TypeInt4        = table.TypeInt4
+	TypeInt8        = table.TypeInt8
+	TypeFloat4      = table.TypeFloat4
+	TypeFloat8      = table.TypeFloat8
+	TypeNumeric     = table.TypeNumeric
+	TypeText        = table.TypeText
+	TypeVarchar     = table.TypeVarchar
+	TypeBytea       = table.TypeBytea
+	TypeDate        = table.TypeDate
+	TypeTimestamp   = table.TypeTimestamp
+	TypeTimestampTZ = table.TypeTimestampTZ
+	TypeUUID        = table.TypeUUID
+	TypeJSONB       = table.TypeJSONB
+)
+
 // Value is a key-value entry's value (the kv model's).
 type Value = kv.Value
+
+// ValueKind is what a key-value entry holds, and how it merges.
+type ValueKind = kv.Kind
+
+// The kv model's value kinds.
+const (
+	ValueBytes     = kv.Bytes
+	ValueCounter   = kv.Counter
+	ValueSet       = kv.Set
+	ValueHash      = kv.Hash
+	ValueSortedSet = kv.SortedSet
+	ValueSequence  = kv.Sequence
+)
 
 // Node is a document, or a field of one (the merge library's JSON-like tree).
 type Node = merge.Node
