@@ -79,3 +79,17 @@ find: if root.Format != Format {\n\t\treturn fmt.Errorf("%w: kv format %d", mode
 replace: if root.Format != Format && false {\n\t\treturn fmt.Errorf("%w: kv format %d", model.ErrUnknownModel, root.Format)
 pkg: ./model/kv
 run: ^TestWalkNamesEveryChunkOfAnObject$
+
+id: kv-diff-locates-a-change-by-its-key
+file: model/kv/kv.go
+find: return model.Change{Kind: kinds[c.Kind], Location: c.Key}, true, nil
+replace: return model.Change{Kind: kinds[c.Kind]}, true, nil
+pkg: ./model/kv
+run: ^TestDiffIsOneChangePerKey$
+
+id: kv-diff-opens-both-sides
+file: model/kv/kv.go
+find: tm, err := open(ctx, readOnly{r}, m.Config, to)
+replace: tm, err := open(ctx, readOnly{r}, m.Config, model.Root{Hash: to.Hash, Size: to.Size, Format: Format})
+pkg: ./model/kv
+run: ^TestDiffIsOneChangePerKey$

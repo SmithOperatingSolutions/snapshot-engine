@@ -162,9 +162,33 @@ func (m Model) Walk(ctx context.Context, root model.Root, r chunk.Reader, visit 
 	})
 }
 
-// Diff implements model.Model.
+var kinds = map[prolly.ChangeKind]model.ChangeKind{prolly.Added: model.Added, prolly.Removed: model.Removed, prolly.Modified: model.Modified}
+
+type diffIter struct{ d *prolly.DiffIter }
+
+func (d diffIter) Next(context.Context) (model.Change, bool, error) {
+	c, ok, err := d.d.Next()
+	if err != nil || !ok {
+		return model.Change{}, false, err
+	}
+	return model.Change{Kind: kinds[c.Kind], Location: c.Key}, true, nil
+}
+
+// Diff implements model.Model: a change per key, located by the key.
 func (m Model) Diff(ctx context.Context, from, to model.Root, r chunk.Reader) (model.DiffIter, error) {
-	return nil, errNotImplemented
+	fm, err := open(ctx, readOnly{r}, m.Config, from)
+	if err != nil {
+		return nil, err
+	}
+	tm, err := open(ctx, readOnly{r}, m.Config, to)
+	if err != nil {
+		return nil, err
+	}
+	d, err := prolly.Diff(ctx, fm, tm)
+	if err != nil {
+		return nil, err
+	}
+	return diffIter{d}, nil
 }
 
 // Merge implements model.Model.
