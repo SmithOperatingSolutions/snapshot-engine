@@ -68,6 +68,10 @@ func scrub(ctx context.Context, l Logger, err error) error {
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
+	var own callerOwn
+	if errors.As(err, &own) { // the caller's own callback's error goes back as it came
+		return own.err
+	}
 	if _, ok := err.(*Error); ok { //nolint:errorlint // only an error scrubbed at the top is scrubbed already; one wrapped inside another is not
 		return err
 	}
@@ -93,9 +97,6 @@ func correlation() string {
 	}
 	return hex.EncodeToString(b[:])
 }
-
-// errNotImplemented is what a stub returns while E4 is built.
-var errNotImplemented = errors.New("engine: not implemented")
 
 // translate turns an error from the core into the engine error a caller
 // matches, keeping the core's for errors.Is. What reaches a caller is
@@ -127,3 +128,18 @@ func translate(err error) error {
 // exported call returns through it, so no path can hand a caller the core's
 // error.
 func scrubInto(ctx context.Context, l Logger, err *error) { *err = scrub(ctx, l, *err) }
+
+// callerOwn marks an error the caller's own callback returned (a scan's
+// each): scrub hands it back as it came, since it is the caller's.
+type callerOwn struct{ err error }
+
+func (c callerOwn) Error() string { return c.err.Error() }
+func (c callerOwn) Unwrap() error { return c.err }
+
+// callersOwn marks err, when there is one, as the caller's own.
+func callersOwn(err error) error {
+	if err == nil {
+		return nil
+	}
+	return callerOwn{err}
+}

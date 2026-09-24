@@ -138,7 +138,8 @@ func (t *Txn) stored(ctx context.Context, name string, id model.ID) (object.Ref,
 }
 
 // CreateTable makes a table named name.
-func (t *Txn) CreateTable(ctx context.Context, name string, s Schema) (*Table, error) {
+func (t *Txn) CreateTable(ctx context.Context, name string, s Schema) (_ *Table, err error) {
+	defer t.s.db.scrubInto(ctx, &err)
 	if err := t.creatable(ctx, name); err != nil {
 		return nil, err
 	}
@@ -152,7 +153,8 @@ func (t *Txn) CreateTable(ctx context.Context, name string, s Schema) (*Table, e
 }
 
 // Table opens the table named name.
-func (t *Txn) Table(ctx context.Context, name string) (*Table, error) {
+func (t *Txn) Table(ctx context.Context, name string) (_ *Table, err error) {
+	defer t.s.db.scrubInto(ctx, &err)
 	if err := t.check(); err != nil {
 		return nil, err
 	}
@@ -179,7 +181,8 @@ func (t *Txn) Table(ctx context.Context, name string) (*Table, error) {
 }
 
 // CreateKV makes a key-value map named name.
-func (t *Txn) CreateKV(ctx context.Context, name string) (*KV, error) {
+func (t *Txn) CreateKV(ctx context.Context, name string) (_ *KV, err error) {
+	defer t.s.db.scrubInto(ctx, &err)
 	if err := t.creatable(ctx, name); err != nil {
 		return nil, err
 	}
@@ -193,7 +196,8 @@ func (t *Txn) CreateKV(ctx context.Context, name string) (*KV, error) {
 }
 
 // KV opens the key-value map named name.
-func (t *Txn) KV(ctx context.Context, name string) (*KV, error) {
+func (t *Txn) KV(ctx context.Context, name string) (_ *KV, err error) {
+	defer t.s.db.scrubInto(ctx, &err)
 	if err := t.check(); err != nil {
 		return nil, err
 	}
@@ -220,7 +224,8 @@ func (t *Txn) KV(ctx context.Context, name string) (*KV, error) {
 }
 
 // CreateCollection makes a document collection named name.
-func (t *Txn) CreateCollection(ctx context.Context, name string) (*Collection, error) {
+func (t *Txn) CreateCollection(ctx context.Context, name string) (_ *Collection, err error) {
+	defer t.s.db.scrubInto(ctx, &err)
 	if err := t.creatable(ctx, name); err != nil {
 		return nil, err
 	}
@@ -234,7 +239,8 @@ func (t *Txn) CreateCollection(ctx context.Context, name string) (*Collection, e
 }
 
 // Collection opens the document collection named name.
-func (t *Txn) Collection(ctx context.Context, name string) (*Collection, error) {
+func (t *Txn) Collection(ctx context.Context, name string) (_ *Collection, err error) {
+	defer t.s.db.scrubInto(ctx, &err)
 	if err := t.check(); err != nil {
 		return nil, err
 	}
@@ -262,7 +268,8 @@ func (t *Txn) Collection(ctx context.Context, name string) (*Collection, error) 
 
 // Drop removes the object named name, of whatever kind; a handle to it
 // refuses every call after.
-func (t *Txn) Drop(ctx context.Context, name string) error {
+func (t *Txn) Drop(ctx context.Context, name string) (err error) {
+	defer t.s.db.scrubInto(ctx, &err)
 	if err := t.check(); err != nil {
 		return err
 	}
@@ -309,7 +316,8 @@ func (t *Txn) namespace(ctx context.Context) (*object.Namespace, error) {
 // through the models; a collision anywhere is ErrSerialization. A swap lost
 // to a commit landing between the read and the swap is tried again, up to
 // maxCommitAttempts times. The transaction is finished whatever happens.
-func (t *Txn) Commit(ctx context.Context) error {
+func (t *Txn) Commit(ctx context.Context) (err error) {
+	defer t.s.db.scrubInto(ctx, &err)
 	if err := t.check(); err != nil {
 		return err
 	}
@@ -363,7 +371,8 @@ func (t *Txn) Commit(ctx context.Context) error {
 }
 
 // Rollback discards the transaction.
-func (t *Txn) Rollback(ctx context.Context) error {
+func (t *Txn) Rollback(ctx context.Context) (err error) {
+	defer t.s.db.scrubInto(ctx, &err)
 	if err := t.check(); err != nil {
 		return err
 	}
@@ -419,7 +428,8 @@ func (h *Table) editor() *table.Editor {
 func (h *Table) Schema() Schema { return h.t.Schema() }
 
 // Get reads the row with key.
-func (h *Table) Get(ctx context.Context, key Key) (Row, bool, error) {
+func (h *Table) Get(ctx context.Context, key Key) (_ Row, _ bool, err error) {
+	defer h.tx.s.db.scrubInto(ctx, &err)
 	if err := h.check(); err != nil {
 		return nil, false, err
 	}
@@ -435,7 +445,8 @@ func (h *Table) Get(ctx context.Context, key Key) (Row, bool, error) {
 
 // Scan calls each for every row in key order until it returns false or an
 // error.
-func (h *Table) Scan(ctx context.Context, each func(Key, Row) (bool, error)) error {
+func (h *Table) Scan(ctx context.Context, each func(Key, Row) (bool, error)) (err error) {
+	defer h.tx.s.db.scrubInto(ctx, &err)
 	if err := h.check(); err != nil {
 		return err
 	}
@@ -450,7 +461,8 @@ func (h *Table) Scan(ctx context.Context, each func(Key, Row) (bool, error)) err
 }
 
 // Lookup calls each for every row whose index columns equal values.
-func (h *Table) Lookup(ctx context.Context, index Tag, values []any, each func(Key, Row) (bool, error)) error {
+func (h *Table) Lookup(ctx context.Context, index Tag, values []any, each func(Key, Row) (bool, error)) (err error) {
+	defer h.tx.s.db.scrubInto(ctx, &err)
 	if err := h.check(); err != nil {
 		return err
 	}
@@ -475,14 +487,15 @@ func drain(rows *table.Rows, each func(Key, Row) (bool, error)) error {
 			return nil
 		}
 		if more, err := each(k, r); err != nil || !more {
-			return err
+			return callersOwn(err)
 		}
 	}
 }
 
 // Insert adds a row and returns its key; a row the table refuses writes
 // nothing.
-func (h *Table) Insert(ctx context.Context, row Row) (Key, error) {
+func (h *Table) Insert(ctx context.Context, row Row) (_ Key, err error) {
+	defer h.tx.s.db.scrubInto(ctx, &err)
 	if err := h.check(); err != nil {
 		return nil, err
 	}
@@ -494,7 +507,8 @@ func (h *Table) Insert(ctx context.Context, row Row) (Key, error) {
 }
 
 // Update replaces the row with key.
-func (h *Table) Update(ctx context.Context, key Key, row Row) error {
+func (h *Table) Update(ctx context.Context, key Key, row Row) (err error) {
+	defer h.tx.s.db.scrubInto(ctx, &err)
 	if err := h.check(); err != nil {
 		return err
 	}
@@ -502,7 +516,8 @@ func (h *Table) Update(ctx context.Context, key Key, row Row) error {
 }
 
 // Delete removes the row with key.
-func (h *Table) Delete(ctx context.Context, key Key) error {
+func (h *Table) Delete(ctx context.Context, key Key) (err error) {
+	defer h.tx.s.db.scrubInto(ctx, &err)
 	if err := h.check(); err != nil {
 		return err
 	}
@@ -511,7 +526,8 @@ func (h *Table) Delete(ctx context.Context, key Key) error {
 
 // Alter gives the table a new schema (columns by tag: renames, additions,
 // drops, widenings).
-func (h *Table) Alter(ctx context.Context, next Schema) error {
+func (h *Table) Alter(ctx context.Context, next Schema) (err error) {
+	defer h.tx.s.db.scrubInto(ctx, &err)
 	if err := h.check(); err != nil {
 		return err
 	}
@@ -590,7 +606,8 @@ func (m *KV) editor() *kv.MapEditor {
 }
 
 // Get reads key.
-func (m *KV) Get(ctx context.Context, key []byte) (Value, bool, error) {
+func (m *KV) Get(ctx context.Context, key []byte) (_ Value, _ bool, err error) {
+	defer m.tx.s.db.scrubInto(ctx, &err)
 	if err := m.check(); err != nil {
 		return Value{}, false, err
 	}
@@ -606,7 +623,8 @@ func (m *KV) Get(ctx context.Context, key []byte) (Value, bool, error) {
 
 // Set writes key; a key or value the kv model refuses is ErrInvalid and
 // writes nothing.
-func (m *KV) Set(ctx context.Context, key []byte, v Value) error {
+func (m *KV) Set(ctx context.Context, key []byte, v Value) (err error) {
+	defer m.tx.s.db.scrubInto(ctx, &err)
 	if err := m.check(); err != nil {
 		return err
 	}
@@ -615,7 +633,8 @@ func (m *KV) Set(ctx context.Context, key []byte, v Value) error {
 
 // Delete removes key. A key that is not there is a no-op, as in the kv
 // model (Redis's DEL); a table's Delete of a missing row is ErrNotFound.
-func (m *KV) Delete(ctx context.Context, key []byte) error {
+func (m *KV) Delete(ctx context.Context, key []byte) (err error) {
+	defer m.tx.s.db.scrubInto(ctx, &err)
 	if err := m.check(); err != nil {
 		return err
 	}
@@ -624,7 +643,8 @@ func (m *KV) Delete(ctx context.Context, key []byte) error {
 
 // Scan calls each for every key at or after from (nil: the first) in key
 // order until it returns false or an error.
-func (m *KV) Scan(ctx context.Context, from []byte, each func([]byte, Value) (bool, error)) error {
+func (m *KV) Scan(ctx context.Context, from []byte, each func([]byte, Value) (bool, error)) (err error) {
+	defer m.tx.s.db.scrubInto(ctx, &err)
 	if err := m.check(); err != nil {
 		return err
 	}
@@ -644,7 +664,7 @@ func (m *KV) Scan(ctx context.Context, from []byte, each func([]byte, Value) (bo
 			return nil
 		}
 		if more, err := each(k, v); err != nil || !more {
-			return err
+			return callersOwn(err)
 		}
 	}
 }
@@ -706,7 +726,8 @@ func (c *Collection) editor() *document.CollectionEditor {
 }
 
 // Get reads the record with id.
-func (c *Collection) Get(ctx context.Context, id []byte) (Node, bool, error) {
+func (c *Collection) Get(ctx context.Context, id []byte) (_ Node, _ bool, err error) {
+	defer c.tx.s.db.scrubInto(ctx, &err)
 	if err := c.check(); err != nil {
 		return Node{}, false, err
 	}
@@ -722,7 +743,8 @@ func (c *Collection) Get(ctx context.Context, id []byte) (Node, bool, error) {
 
 // Put writes the record with id; an id or document the model refuses is
 // ErrInvalid and writes nothing.
-func (c *Collection) Put(ctx context.Context, id []byte, doc Node) error {
+func (c *Collection) Put(ctx context.Context, id []byte, doc Node) (err error) {
+	defer c.tx.s.db.scrubInto(ctx, &err)
 	if err := c.check(); err != nil {
 		return err
 	}
@@ -731,7 +753,8 @@ func (c *Collection) Put(ctx context.Context, id []byte, doc Node) error {
 
 // PutJSON parses text with the document model's bounded parser and writes
 // it; malformed or oversized text is ErrInvalid and writes nothing.
-func (c *Collection) PutJSON(ctx context.Context, id []byte, text []byte) error {
+func (c *Collection) PutJSON(ctx context.Context, id []byte, text []byte) (err error) {
+	defer c.tx.s.db.scrubInto(ctx, &err)
 	if err := c.check(); err != nil {
 		return err
 	}
@@ -741,7 +764,8 @@ func (c *Collection) PutJSON(ctx context.Context, id []byte, text []byte) error 
 // Delete removes the record with id. A record that is not there is a
 // no-op, as in the document model (Mongo's deleteOne); a table's Delete of
 // a missing row is ErrNotFound.
-func (c *Collection) Delete(ctx context.Context, id []byte) error {
+func (c *Collection) Delete(ctx context.Context, id []byte) (err error) {
+	defer c.tx.s.db.scrubInto(ctx, &err)
 	if err := c.check(); err != nil {
 		return err
 	}
@@ -750,7 +774,8 @@ func (c *Collection) Delete(ctx context.Context, id []byte) error {
 
 // Scan calls each for every record at or after from (nil: the first) in id
 // order until it returns false or an error.
-func (c *Collection) Scan(ctx context.Context, from []byte, each func([]byte, Node) (bool, error)) error {
+func (c *Collection) Scan(ctx context.Context, from []byte, each func([]byte, Node) (bool, error)) (err error) {
+	defer c.tx.s.db.scrubInto(ctx, &err)
 	if err := c.check(); err != nil {
 		return err
 	}
@@ -770,7 +795,7 @@ func (c *Collection) Scan(ctx context.Context, from []byte, each func([]byte, No
 			return nil
 		}
 		if more, err := each(id, n); err != nil || !more {
-			return err
+			return callersOwn(err)
 		}
 	}
 }

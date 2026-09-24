@@ -1101,8 +1101,8 @@ run: ^TestBranchesAreCreatedCheckedOutAndDeleted$
 
 id: session-a-hash-no-commit-has-is-not-found
 file: engine/session.go
-find: if errors.Is(err, chunk.ErrNotFound) {\n\t\t\treturn hash.Hash{}, fmt.Errorf("%w: no commit by that hash", ErrNotFound)
-replace: if errors.Is(err, chunk.ErrNotFound) && false {\n\t\t\treturn hash.Hash{}, fmt.Errorf("%w: no commit by that hash", ErrNotFound)
+find: if errors.Is(err, chunk.ErrNotFound) {\n\t\t\treturn hash.Hash{}, fmt.Errorf("%w: no commit %s", ErrNotFound, h)
+replace: if errors.Is(err, chunk.ErrNotFound) && false {\n\t\t\treturn hash.Hash{}, fmt.Errorf("%w: no commit %s", ErrNotFound, h)
 pkg: ./engine
 run: ^TestBranchesAreCreatedCheckedOutAndDeleted$
 
@@ -1697,3 +1697,46 @@ find: if err := c.tx.check(); err != nil {
 replace: if err := c.tx.check(); err != nil && false {
 pkg: ./engine
 run: ^TestFinishedAndDroppedKVAndCollectionsRefuse$
+
+# engine scrub in transactions
+id: engine-txn-insert-is-scrubbed
+file: engine/txn.go
+find: func (h *Table) Insert(ctx context.Context, row Row) (_ Key, err error) {\n\tdefer h.tx.s.db.scrubInto(ctx, &err)
+replace: func (h *Table) Insert(ctx context.Context, row Row) (_ Key, err error) {\n\t// not scrubbed
+pkg: ./engine
+run: ^TestTransactionErrorsCarryNoData$
+
+id: engine-txn-kv-set-is-scrubbed
+file: engine/txn.go
+find: func (m *KV) Set(ctx context.Context, key []byte, v Value) (err error) {\n\tdefer m.tx.s.db.scrubInto(ctx, &err)
+replace: func (m *KV) Set(ctx context.Context, key []byte, v Value) (err error) {\n\t// not scrubbed
+pkg: ./engine
+run: ^TestTransactionErrorsCarryNoData$
+
+id: engine-txn-putjson-is-scrubbed
+file: engine/txn.go
+find: func (c *Collection) PutJSON(ctx context.Context, id []byte, text []byte) (err error) {\n\tdefer c.tx.s.db.scrubInto(ctx, &err)
+replace: func (c *Collection) PutJSON(ctx context.Context, id []byte, text []byte) (err error) {\n\t// not scrubbed
+pkg: ./engine
+run: ^TestTransactionErrorsCarryNoData$
+
+id: engine-txn-table-open-is-scrubbed
+file: engine/txn.go
+find: func (t *Txn) Table(ctx context.Context, name string) (_ *Table, err error) {\n\tdefer t.s.db.scrubInto(ctx, &err)
+replace: func (t *Txn) Table(ctx context.Context, name string) (_ *Table, err error) {\n\t// not scrubbed
+pkg: ./engine
+run: ^TestABackendFailingAReadFailsTheCall$
+
+id: engine-txn-commit-is-scrubbed
+file: engine/txn.go
+find: func (t *Txn) Commit(ctx context.Context) (err error) {\n\tdefer t.s.db.scrubInto(ctx, &err)
+replace: func (t *Txn) Commit(ctx context.Context) (err error) {\n\t// not scrubbed
+pkg: ./engine
+run: ^TestABackendFailingACommitWritesNothing$
+
+id: engine-a-callbacks-error-is-the-callers
+file: engine/errors.go
+find: if errors.As(err, &own) { // the caller's own callback's error goes back as it came
+replace: if errors.As(err, &own) && false { // the caller's own callback's error goes back as it came
+pkg: ./engine
+run: ^TestHandleReadsStopAndRefuse$
