@@ -73,6 +73,13 @@ func subject(t *testing.T) contract.Subject {
 			es[keys[0]] = bytesValue(fmt.Sprintf("edited %d", seed))
 			return serialize(es)
 		},
+		Collide: func(c []byte, seed uint64) (ours, theirs []byte) { // one key, two values
+			o, th := parse(t, c), parse(t, c)
+			keys := keysOf(o)
+			sort.Strings(keys)
+			o[keys[0]], th[keys[0]] = bytesValue(fmt.Sprintf("ours %d", seed)), bytesValue(fmt.Sprintf("theirs %d", seed))
+			return serialize(o), serialize(th)
+		},
 		Write: func(t *testing.T, c []byte) model.Root {
 			t.Helper()
 			r, err := kv.Write(ctx, s, cfg(), parse(t, c))
