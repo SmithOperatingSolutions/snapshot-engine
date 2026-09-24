@@ -5,7 +5,10 @@
 // both once, and two different changes to one key are a conflict at that key.
 package kv
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Kind is a value's type, the first byte of its frame.
 type Kind uint8
@@ -25,10 +28,32 @@ type Value struct {
 	Bytes []byte
 }
 
-var errNotImplemented = errors.New("kv: not implemented")
+// ErrValue is a frame or a value that is not one of ours.
+var ErrValue = errors.New("kv: not a value")
 
 // EncodeValue returns a value's frame: kind u8 · payload.
-func EncodeValue(v Value) ([]byte, error) { return nil, errNotImplemented }
+func EncodeValue(v Value) ([]byte, error) {
+	if v.Kind != Bytes {
+		return nil, fmt.Errorf("%w: kind %d", ErrValue, v.Kind)
+	}
+	if len(v.Bytes) > MaxValueSize {
+		return nil, fmt.Errorf("%w: %d bytes, limit %d", ErrValue, len(v.Bytes), MaxValueSize)
+	}
+	f := make([]byte, 0, 1+len(v.Bytes))
+	f = append(f, byte(v.Kind))
+	return append(f, v.Bytes...), nil
+}
 
 // DecodeValue parses a frame; every other byte string is refused.
-func DecodeValue(b []byte) (Value, error) { return Value{}, errNotImplemented }
+func DecodeValue(b []byte) (Value, error) {
+	if len(b) == 0 {
+		return Value{}, fmt.Errorf("%w: an empty frame", ErrValue)
+	}
+	if Kind(b[0]) != Bytes {
+		return Value{}, fmt.Errorf("%w: kind %d", ErrValue, b[0])
+	}
+	if len(b)-1 > MaxValueSize {
+		return Value{}, fmt.Errorf("%w: %d bytes, limit %d", ErrValue, len(b)-1, MaxValueSize)
+	}
+	return Value{Kind: Bytes, Bytes: append([]byte(nil), b[1:]...)}, nil
+}

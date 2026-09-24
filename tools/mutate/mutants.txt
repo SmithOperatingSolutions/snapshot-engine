@@ -7,3 +7,33 @@
 #   replace: <text>
 #   pkg: ./<package>
 #   run: ^TestName$
+
+# model/kv
+
+id: kv-encode-refuses-an-unknown-kind
+file: model/kv/value.go
+find: if v.Kind != Bytes {
+replace: if v.Kind != Bytes && false {
+pkg: ./model/kv
+run: ^TestAFrameThatIsNotAValueIsRefused$
+
+id: kv-encode-caps-the-payload
+file: model/kv/value.go
+find: if len(v.Bytes) > MaxValueSize {
+replace: if len(v.Bytes) > MaxValueSize && false {
+pkg: ./model/kv
+run: ^TestAFrameThatIsNotAValueIsRefused$
+
+id: kv-decode-refuses-an-unknown-kind
+file: model/kv/value.go
+find: if Kind(b[0]) != Bytes {
+replace: if Kind(b[0]) != Bytes && false {
+pkg: ./model/kv
+run: ^TestAFrameThatIsNotAValueIsRefused$
+
+id: kv-decode-caps-the-payload
+file: model/kv/value.go
+find: if len(b)-1 > MaxValueSize {
+replace: if len(b)-1 > MaxValueSize && false {
+pkg: ./model/kv
+run: ^TestAFrameThatIsNotAValueIsRefused$
