@@ -777,3 +777,52 @@ find: if errors.As(err, &e) && err == error(e) { // scrubbed already
 replace: if errors.As(err, &e) && false { // scrubbed already
 pkg: ./engine
 run: ^TestAScrubbedErrorIsNotScrubbedAgain$
+# model handles
+id: kv-handle-set-checks-the-key
+file: model/kv/handle.go
+find: func (e *MapEditor) Set(key []byte, v Value) error {\n\tif err := checkKey(key); err != nil {
+replace: func (e *MapEditor) Set(key []byte, v Value) error {\n\tif err := checkKey(key); err != nil && false {
+pkg: ./model/kv
+run: ^TestARefusedEditWritesNothing$
+
+id: kv-handle-delete-checks-the-key
+file: model/kv/handle.go
+find: func (e *MapEditor) Delete(key []byte) error {\n\tif err := checkKey(key); err != nil {
+replace: func (e *MapEditor) Delete(key []byte) error {\n\tif err := checkKey(key); err != nil && false {
+pkg: ./model/kv
+run: ^TestARefusedEditWritesNothing$
+
+id: kv-handle-get-checks-the-key
+file: model/kv/handle.go
+find: func (m *Map) Get(ctx context.Context, key []byte) (Value, bool, error) {\n\tif err := checkKey(key); err != nil {
+replace: func (m *Map) Get(ctx context.Context, key []byte) (Value, bool, error) {\n\tif err := checkKey(key); err != nil && false {
+pkg: ./model/kv
+run: ^TestARefusedEditWritesNothing$
+
+id: kv-handle-get-checks-the-frame
+file: model/kv/handle.go
+find: v, err := checked(key, f)\n\tif err != nil {\n\t\treturn Value{}, false, err
+replace: v, _ := checked(key, f)\n\tif err != nil {\n\t\treturn Value{}, false, err
+pkg: ./model/kv
+run: ^TestAMapRefusesWhatIsNotOurs$
+
+id: kv-handle-scan-checks-the-frame
+file: model/kv/handle.go
+find: if v, err = checked(k, f); err != nil {
+replace: if v, _ = checked(k, f); err != nil {
+pkg: ./model/kv
+run: ^TestAMapRefusesWhatIsNotOurs$
+
+id: kv-handle-scan-starts-at-its-key
+file: model/kv/handle.go
+find: it, err := m.m.IterRange(ctx, from, nil)
+replace: it, err := m.m.IterRange(ctx, nil, nil)
+pkg: ./model/kv
+run: ^TestAMapScansInKeyOrderFromAKey$
+
+id: kv-handle-open-checks-the-root
+file: model/kv/handle.go
+find: m, err := spec(c).Open(ctx, s, root)
+replace: m, err := prolly.Open(ctx, s, c, root.Hash)
+pkg: ./model/kv
+run: ^TestAMapRefusesWhatIsNotOurs$

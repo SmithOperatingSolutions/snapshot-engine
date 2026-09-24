@@ -59,29 +59,22 @@ func checkKey(k []byte) error {
 	return nil
 }
 
-// Write stores entries as an object.
+// Write stores entries as an object: a new map with every entry set.
 func Write(ctx context.Context, s chunk.ReadWriter, c prolly.Config, entries map[string]Value) (model.Root, error) {
-	m, err := prolly.Empty(ctx, s, c)
+	m, err := Empty(ctx, s, c)
 	if err != nil {
 		return model.Root{}, err
 	}
-	e := m.Editor()
+	e := m.Edit()
 	for k, v := range entries {
-		if err := checkKey([]byte(k)); err != nil {
-			return model.Root{}, err
-		}
-		f, err := EncodeValue(v)
-		if err != nil {
-			return model.Root{}, err
-		}
-		if err := e.Put([]byte(k), f); err != nil {
+		if err := e.Set([]byte(k), v); err != nil {
 			return model.Root{}, err
 		}
 	}
 	if m, err = e.Flush(ctx); err != nil {
 		return model.Root{}, err
 	}
-	return spec(c).Root(m), nil
+	return m.Root(), nil
 }
 
 // checked decodes a stored entry and its key.
@@ -94,26 +87,22 @@ func checked(key, frame []byte) (Value, error) {
 
 // Read returns an object's entries.
 func Read(ctx context.Context, r chunk.Reader, c prolly.Config, root model.Root) (map[string]Value, error) {
-	m, err := spec(c).Open(ctx, mapobject.ReadOnly(r), root)
+	m, err := Open(ctx, mapobject.ReadOnly(r), c, root)
 	if err != nil {
 		return nil, err
 	}
-	it, err := m.IterRange(ctx, nil, nil)
+	it, err := m.Scan(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]Value, m.Count())
+	out := make(map[string]Value, m.m.Count())
 	for {
-		k, f, ok, err := it.Next()
+		k, v, ok, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
 			return out, nil
-		}
-		v, err := checked(k, f)
-		if err != nil {
-			return nil, err
 		}
 		out[string(k)] = v
 	}
