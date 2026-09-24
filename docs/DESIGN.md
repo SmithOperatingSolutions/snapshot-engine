@@ -130,11 +130,17 @@ nesting levels, 1000 digits either side of a number's point, a 6-digit
 exponent; surrogate pairs as one rune, lone surrogates refused, a field
 twice in one object refused.
 
-*Merge*: per record through the helper; a record both sides changed merges
-by field path through `merge.Tree`. *Location*: the record id; a record's
-field conflicts are named in the reason as `field <path>: <why>; ...` with
-`merge.Path` paths (`address/city`), until the helper's resolver can
-locate a conflict below the key.
+*Merge*: per record through the helper's `MergeWith`; a record both sides
+changed in place merges by field path through `merge.Tree`, each field
+conflict its own `model.Conflict`; deleted against changed, or added
+twice, is one conflict at the record as a whole; a stored record that does
+not decode aborts the merge with the error. *Location*: a change (Diff) is
+at the bare record id; a conflict at `Locate(id, path)`: the id and each
+path segment, each prefixed by its uvarint length, so an id may hold any
+bytes and a field name any text; the path is empty for the record as a
+whole. `ParseLocation` reads it back and refuses an empty or oversized
+id, more than 64 segments, a truncated part or a varint that is not
+minimal.
 
 ## 4. Testing tiers
 
