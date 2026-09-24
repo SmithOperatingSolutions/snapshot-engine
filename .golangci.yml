@@ -51,7 +51,9 @@ linters:
           deny:
             - pkg: github.com/SmithOperatingSolutions/snapshot-core
               desc: "the merge library is pure values; it knows nothing of the core (DESIGN D5)"
-            - pkg: github.com/SmithOperatingSolutions/snapshot-engine
+            - pkg: github.com/SmithOperatingSolutions/snapshot-engine/model
+              desc: "no upward imports: merge is the bottom layer"
+            - pkg: github.com/SmithOperatingSolutions/snapshot-engine/engine
               desc: "no upward imports: merge is the bottom layer"
         models-are-plugins:
           files: ["**/model/**"]
