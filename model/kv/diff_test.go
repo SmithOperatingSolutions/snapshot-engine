@@ -70,4 +70,7 @@ func TestDiffIsOneChangePerKey(t *testing.T) {
 	if _, err := m.Diff(ctx, from, model.Root{Hash: to.Hash, Size: to.Size, Format: 2}, s); err == nil {
 		t.Fatal("diffing against another format was accepted")
 	}
+	if _, err := m.Diff(ctx, model.Root{Hash: from.Hash, Size: from.Size, Format: 2}, to, s); err == nil {
+		t.Fatal("diffing from another format was accepted")
+	}
 }

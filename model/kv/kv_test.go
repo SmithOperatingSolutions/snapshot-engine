@@ -162,6 +162,23 @@ func TestValidateRefusesWhatIsNotAnObject(t *testing.T) {
 	if _, err := kv.Read(ctx, s, cfg(), bad); err == nil {
 		t.Error("a map holding a frame of an unknown kind reads")
 	}
+	// A map built by hand with an empty key: not a key of ours, however
+	// well its frame decodes.
+	pm, err = prolly.Empty(ctx, s, cfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e = pm.Editor()
+	if err := e.Put([]byte{}, []byte{byte(kv.Bytes), 'v'}); err != nil {
+		t.Fatal(err)
+	}
+	if pm, err = e.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	empty := model.Root{Hash: pm.Root(), Size: 1, Format: kv.Format}
+	if err := m.Validate(ctx, empty, s); !errors.Is(err, chunk.ErrCorrupt) || !errors.Is(err, kv.ErrKey) {
+		t.Errorf("a map holding an empty key validates: %v, want ErrCorrupt wrapping ErrKey", err)
+	}
 }
 
 // Walk names the root first and then every chunk the object is made of:
@@ -202,5 +219,8 @@ func TestWalkNamesEveryChunkOfAnObject(t *testing.T) {
 	}
 	if err := m.Walk(ctx, model.Root{Hash: root.Hash, Size: root.Size, Format: 2}, s, func(hash.Hash, bool) (bool, error) { return true, nil }); !errors.Is(err, model.ErrUnknownModel) {
 		t.Errorf("walking format 2: %v, want ErrUnknownModel", err)
+	}
+	if err := m.Walk(ctx, model.Root{Hash: root.Hash, Size: root.Size, Depth: 1, Format: kv.Format}, s, func(hash.Hash, bool) (bool, error) { return true, nil }); !errors.Is(err, chunk.ErrCorrupt) {
+		t.Errorf("walking a root claiming depth 1: %v, want ErrCorrupt", err)
 	}
 }

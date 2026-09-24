@@ -2,6 +2,7 @@ package kv_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk/memstore"
@@ -122,5 +123,45 @@ func TestMergeAppliesOnlyValuesOfOurs(t *testing.T) {
 	theirs := model.Root{Hash: pm.Root(), Size: 2, Format: kv.Format}
 	if _, err := m.Merge(ctx, base, ours, theirs, s); !errors.Is(err, kv.ErrValue) {
 		t.Fatalf("merging a side holding a frame of no kind: %v, want ErrValue", err)
+	}
+}
+
+// The two cases the main merge test leaves out: a key theirs deleted and
+// ours kept is gone from the merged object, and a key both sides added with
+// different values is a conflict that says so. And every side is held to
+// its root's claims: a base of another format is refused.
+func TestMergeDeletesForTheirsAndNamesAnAddedTwiceKey(t *testing.T) {
+	s := memstore.New()
+	m := kv.Model{Config: cfg()}
+	base := write(t, s, map[string]kv.Value{"keep": bytesValue("k"), "gone": bytesValue("g")})
+	ours := write(t, s, map[string]kv.Value{"keep": bytesValue("k"), "gone": bytesValue("g"), "new": bytesValue("ours")})
+	theirs := write(t, s, map[string]kv.Value{"keep": bytesValue("k"), "new": bytesValue("theirs")})
+	res, err := m.Merge(ctx, base, ours, theirs, s)
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if len(res.Conflicts) != 1 || string(res.Conflicts[0].Location) != "new" || !strings.Contains(res.Conflicts[0].Reason, "added") {
+		t.Fatalf("conflicts %+v, want one at new saying both sides added it", res.Conflicts)
+	}
+	theirs = write(t, s, map[string]kv.Value{"keep": bytesValue("k")})
+	ours = write(t, s, map[string]kv.Value{"keep": bytesValue("k"), "gone": bytesValue("g"), "mine": bytesValue("m")})
+	res, err = m.Merge(ctx, base, ours, theirs, s)
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if len(res.Conflicts) != 0 {
+		t.Fatalf("a deletion on one side conflicted: %+v", res.Conflicts)
+	}
+	got, err := kv.Read(ctx, s, cfg(), res.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !equal(got, map[string]kv.Value{"keep": bytesValue("k"), "mine": bytesValue("m")}) {
+		t.Fatalf("merged to %v, want keep and mine: the key theirs deleted must be gone", keysOf(got))
+	}
+	other := base
+	other.Format = 2
+	if _, err := m.Merge(ctx, other, ours, theirs, s); !errors.Is(err, model.ErrUnknownModel) {
+		t.Fatalf("merging from a base of format 2: %v, want ErrUnknownModel", err)
 	}
 }
