@@ -505,3 +505,14 @@ func TestWriteOnOneTableWritesThatTableOnly(t *testing.T) {
 		t.Errorf("row 1 of pets is %q, want rex", got)
 	}
 }
+
+// Revoking from a principal that was never granted anything takes nothing
+// back and breaks nothing: a later grant to it works as any other.
+func TestRevokingFromAStrangerIsANoOp(t *testing.T) {
+	var g engine.Grants
+	grantOK(t, g.Revoke("user:nobody", engine.DatabaseScope(), engine.PermRead))
+	grantOK(t, g.Grant("user:nobody", engine.DatabaseScope(), engine.PermRead))
+	if !grantAllows(t, &g, engine.Principal{ID: "user:nobody"}, engine.ActionRead, "repo") {
+		t.Error("a grant after a revoke of nothing does not hold")
+	}
+}

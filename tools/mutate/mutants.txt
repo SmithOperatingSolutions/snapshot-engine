@@ -1464,3 +1464,10 @@ find: delete(g.protected, branch)
 replace: _ = branch
 pkg: ./engine
 run: ^TestRevokeAndProtect$
+
+id: grants-revoke-of-a-stranger-is-a-no-op
+file: engine/grants.go
+find: if scopes == nil { // nothing to take back
+replace: if false { // nothing to take back
+pkg: ./engine
+run: ^TestRevokingFromAStrangerIsANoOp$
