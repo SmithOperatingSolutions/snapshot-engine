@@ -32,11 +32,19 @@ func (r Result[T]) Clean() bool { return len(r.Conflicts) == 0 }
 // Scalar merges a value both sides may have changed: the side that changed
 // wins over one that did not, and two different changes are a conflict.
 func Scalar[T comparable](base, ours, theirs T) Result[T] {
-	return Result[T]{Value: base}
+	switch {
+	case ours == theirs:
+		return Result[T]{Value: ours}
+	case ours == base:
+		return Result[T]{Value: theirs}
+	case theirs == base:
+		return Result[T]{Value: ours}
+	}
+	return Result[T]{Value: base, Conflicts: []Conflict{{Reason: "both sides changed it, to different values"}}}
 }
 
 // Counter merges an integer both sides may have moved: the base plus both
 // deltas.
 func Counter(base, ours, theirs int64) int64 {
-	return base
+	return base + (ours - base) + (theirs - base)
 }
