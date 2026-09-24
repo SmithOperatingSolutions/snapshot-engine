@@ -132,6 +132,18 @@ func openMap(ctx context.Context, s chunk.ReadWriter, cfg prolly.Config, ir inde
 	return m, nil
 }
 
+// WithSchema rewrites the table under a new schema, matching columns by tag
+// (a rename costs the catalog alone), and returns it; the table itself is
+// unchanged. A column added is NULL in every row and must be nullable; a
+// column dropped takes its cells; an index added is built; a type may widen
+// (int2 to int4 to int8, float4 to float8, varchar to a longer varchar or to
+// text) and the values follow. A value that does not fit the new schema, a
+// type that cannot take the values, and any change to the primary key are
+// refused. (Stub.)
+func (t *Table) WithSchema(ctx context.Context, next Schema) (*Table, error) {
+	return nil, errors.New("table: WithSchema is not implemented")
+}
+
 // Schema is the table's schema.
 func (t *Table) Schema() Schema { return t.schema }
 
