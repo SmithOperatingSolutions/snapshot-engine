@@ -628,9 +628,9 @@ func TestEachVersionOperationNeedsItsGrant(t *testing.T) {
 		"DeleteBranch": {auth.Manage, "branch:feature", func() error { return s.DeleteBranch(ctx, "feature") }},
 		"Branches":     {auth.Read, "repo", func() error { _, err := s.Branches(ctx); return err }},
 		"Objects":      {auth.Read, "branch:main", func() error { _, err := s.Objects(ctx); return err }},
-		"Commit":       {auth.Write, "branch:main", func() error { _, err := s.Commit(ctx, "m"); return err }},
-		"Merge":        {auth.Write, "branch:main", func() error { _, err := s.Merge(ctx, "feature", "m"); return err }},
-		"AbortMerge":   {auth.Write, "branch:main", func() error { return s.AbortMerge(ctx) }},
+		"Commit":       {auth.Commit, "branch:main", func() error { _, err := s.Commit(ctx, "m"); return err }},
+		"Merge":        {auth.Merge, "branch:main", func() error { _, err := s.Merge(ctx, "feature", "m"); return err }},
+		"AbortMerge":   {auth.Merge, "branch:main", func() error { return s.AbortMerge(ctx) }},
 		"Diff":         {auth.Read, "branch:feature", func() error { _, err := s.Diff(ctx, "main", "feature", "config"); return err }},
 		"Log":          {auth.Read, "repo", func() error { _, err := s.Log(ctx, "main", 1); return err }},
 	} {
