@@ -776,8 +776,8 @@ run: ^TestErrorsToCallersAreScrubbed$
 
 id: engine-scrub-is-idempotent
 file: engine/errors.go
-find: if errors.As(err, &e) && err == error(e) { // scrubbed already
-replace: if errors.As(err, &e) && false { // scrubbed already
+find: if _, ok := err.(*Error); ok { //nolint:errorlint
+replace: if _, ok := err.(*Error); ok && false { //nolint:errorlint
 pkg: ./engine
 run: ^TestAScrubbedErrorIsNotScrubbedAgain$
 

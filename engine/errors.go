@@ -66,8 +66,7 @@ func scrub(ctx context.Context, l Logger, err error) error {
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	var e *Error
-	if errors.As(err, &e) && err == error(e) { // scrubbed already
+	if _, ok := err.(*Error); ok { //nolint:errorlint // only an error scrubbed at the top is scrubbed already; one wrapped inside another is not
 		return err
 	}
 	kind := ErrInternal

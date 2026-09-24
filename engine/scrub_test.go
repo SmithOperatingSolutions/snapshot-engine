@@ -53,7 +53,7 @@ func TestErrorsToCallersAreScrubbed(t *testing.T) {
 	if d := log.entries[e.Correlation]; !strings.Contains(d, "customer:4411") {
 		t.Errorf("the log under %s holds %q, want the details", e.Correlation, d)
 	}
-	if errors.Unwrap(got) != engine.ErrInvalid || errors.Unwrap(errors.Unwrap(got)) != nil {
+	if u := errors.Unwrap(got); !errors.Is(u, engine.ErrInvalid) || errors.Unwrap(u) != nil {
 		t.Errorf("the caller's error unwraps past the engine error: the details are reachable")
 	}
 
