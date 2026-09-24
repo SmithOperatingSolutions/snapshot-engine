@@ -67,7 +67,8 @@ func (o Options) repo(m models) repo.Options {
 
 // Create makes a new database on o.Blobs, owned by p, with main as its
 // first branch, written at the default geometry.
-func Create(ctx context.Context, p Principal, o Options) (*Database, error) {
+func Create(ctx context.Context, p Principal, o Options) (_ *Database, err error) {
+	defer scrubInto(ctx, o.Logger, &err)
 	m, err := modelsFor(repo.DefaultGeometry())
 	if err != nil {
 		return nil, err
@@ -81,7 +82,8 @@ func Create(ctx context.Context, p Principal, o Options) (*Database, error) {
 
 // Open opens the database on o.Blobs, with the models configured for the
 // geometry it was created with.
-func Open(ctx context.Context, o Options) (*Database, error) {
+func Open(ctx context.Context, o Options) (_ *Database, err error) {
+	defer scrubInto(ctx, o.Logger, &err)
 	m, err := modelsFor(repo.DefaultGeometry())
 	if err != nil {
 		return nil, err
@@ -124,7 +126,8 @@ func (d *Database) isClosed() bool {
 
 // Session opens a session for p on branch; every call it makes is checked
 // against the authorizer when it is made.
-func (d *Database) Session(ctx context.Context, p Principal, branch string) (*Session, error) {
+func (d *Database) Session(ctx context.Context, p Principal, branch string) (_ *Session, err error) {
+	defer d.scrubInto(ctx, &err)
 	if d.isClosed() {
 		return nil, ErrClosed
 	}
@@ -134,3 +137,7 @@ func (d *Database) Session(ctx context.Context, p Principal, branch string) (*Se
 	}
 	return &Session{db: d, p: p, branch: branch, co: co}, nil
 }
+
+// scrubInto replaces *err with what a caller may be shown (errors.go),
+// the details logged to the database's Logger.
+func (d *Database) scrubInto(ctx context.Context, err *error) { scrubInto(ctx, d.o.Logger, err) }

@@ -35,8 +35,11 @@ func TestTheAPIsErrorsCarryNoNames(t *testing.T) {
 	for name, call := range map[string]func() error{
 		"Session":  func() error { _, err := db.Session(ctx, alice, secret); return err },
 		"Checkout": func() error { return s.Checkout(ctx, secret) },
-		"Diff":     func() error { _, err := s.Diff(ctx, engine.Ref(head.String()), engine.Ref(head.String()), "orders/"+secret); return err },
-		"Log":      func() error { _, err := s.Log(ctx, engine.Ref(secret), 10); return err },
+		"Diff": func() error {
+			_, err := s.Diff(ctx, engine.Ref(head.String()), engine.Ref(head.String()), "orders/"+secret)
+			return err
+		},
+		"Log": func() error { _, err := s.Log(ctx, engine.Ref(secret), 10); return err },
 	} {
 		err := call()
 		if !errors.Is(err, engine.ErrNotFound) {

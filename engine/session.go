@@ -68,11 +68,11 @@ func (s *Session) resolve(ctx context.Context, ref Ref) (hash.Hash, error) {
 	}
 	h, err := hash.Parse(name)
 	if err != nil {
-		return hash.Hash{}, fmt.Errorf("%w: no branch, tag or commit by that name", ErrNotFound)
+		return hash.Hash{}, fmt.Errorf("%w: no branch, tag or commit named %q", ErrNotFound, name)
 	}
 	if c, err = s.db.r.ReadCommit(ctx, s.p, h); err != nil {
 		if errors.Is(err, chunk.ErrNotFound) {
-			return hash.Hash{}, fmt.Errorf("%w: no commit by that hash", ErrNotFound)
+			return hash.Hash{}, fmt.Errorf("%w: no commit %s", ErrNotFound, h)
 		}
 		return hash.Hash{}, translate(err)
 	}
@@ -81,7 +81,8 @@ func (s *Session) resolve(ctx context.Context, ref Ref) (hash.Hash, error) {
 
 // Checkout moves the session to another branch, which must exist and be
 // readable; the session stays where it was otherwise.
-func (s *Session) Checkout(ctx context.Context, branch string) error {
+func (s *Session) Checkout(ctx context.Context, branch string) (err error) {
+	defer s.db.scrubInto(ctx, &err)
 	if err := s.ready(); err != nil {
 		return err
 	}
@@ -96,7 +97,8 @@ func (s *Session) Checkout(ctx context.Context, branch string) error {
 
 // CreateBranch makes a branch at ref: the session branch's head when ref is
 // empty, else a branch, a tag or a commit hash, resolved in that order.
-func (s *Session) CreateBranch(ctx context.Context, name string, at Ref) error {
+func (s *Session) CreateBranch(ctx context.Context, name string, at Ref) (err error) {
+	defer s.db.scrubInto(ctx, &err)
 	if err := s.ready(); err != nil {
 		return err
 	}
@@ -111,7 +113,8 @@ func (s *Session) CreateBranch(ctx context.Context, name string, at Ref) error {
 }
 
 // DeleteBranch deletes a branch other than the session's.
-func (s *Session) DeleteBranch(ctx context.Context, name string) error {
+func (s *Session) DeleteBranch(ctx context.Context, name string) (err error) {
+	defer s.db.scrubInto(ctx, &err)
 	if err := s.ready(); err != nil {
 		return err
 	}
@@ -122,7 +125,8 @@ func (s *Session) DeleteBranch(ctx context.Context, name string) error {
 }
 
 // Branches lists the branches.
-func (s *Session) Branches(ctx context.Context) ([]string, error) {
+func (s *Session) Branches(ctx context.Context) (_ []string, err error) {
+	defer s.db.scrubInto(ctx, &err)
 	if err := s.ready(); err != nil {
 		return nil, err
 	}
@@ -132,7 +136,8 @@ func (s *Session) Branches(ctx context.Context) ([]string, error) {
 
 // Objects lists the objects on the session's branch (its working set), by
 // name, with their kinds.
-func (s *Session) Objects(ctx context.Context) (map[string]Kind, error) {
+func (s *Session) Objects(ctx context.Context) (_ map[string]Kind, err error) {
+	defer s.db.scrubInto(ctx, &err)
 	if err := s.ready(); err != nil {
 		return nil, err
 	}
@@ -195,7 +200,8 @@ func message(m string) error {
 // too: a commit records the working set, as the core does, whether or not
 // it changed. Mid-merge, with conflicts unresolved, it is
 // ErrMergeInProgress.
-func (s *Session) Commit(ctx context.Context, msg string) (Hash, error) {
+func (s *Session) Commit(ctx context.Context, msg string) (_ Hash, err error) {
+	defer s.db.scrubInto(ctx, &err)
 	if err := s.ready(); err != nil {
 		return Hash{}, err
 	}
@@ -215,7 +221,8 @@ func (s *Session) Commit(ctx context.Context, msg string) (Hash, error) {
 // merge is undone); with conflicts the branch is left mid-merge (a Commit
 // or another Merge is ErrMergeInProgress until AbortMerge); a commit the
 // branch already holds merges to nothing and returns the head.
-func (s *Session) Merge(ctx context.Context, from Ref, msg string) (MergeResult, error) {
+func (s *Session) Merge(ctx context.Context, from Ref, msg string) (_ MergeResult, err error) {
+	defer s.db.scrubInto(ctx, &err)
 	if err := s.ready(); err != nil {
 		return MergeResult{}, err
 	}
@@ -290,11 +297,12 @@ func why(k coremerge.Kind) string {
 
 // AbortMerge puts the branch back as it was before a merge in progress;
 // with none in progress it is ErrNotFound.
-func (s *Session) AbortMerge(ctx context.Context) error {
+func (s *Session) AbortMerge(ctx context.Context) (err error) {
+	defer s.db.scrubInto(ctx, &err)
 	if err := s.ready(); err != nil {
 		return err
 	}
-	err := s.db.r.AbortMerge(ctx, s.p, s.branch)
+	err = s.db.r.AbortMerge(ctx, s.p, s.branch)
 	if errors.Is(err, vcs.ErrNoMerge) {
 		return fmt.Errorf("%w: no merge in progress", ErrNotFound)
 	}
@@ -307,7 +315,8 @@ func (s *Session) AbortMerge(ctx context.Context) error {
 // object only one side holds is compared with an empty object of its
 // kind, so every part of it is added or removed; one neither holds is
 // ErrNotFound; one that changed kind is ErrWrongKind.
-func (s *Session) Diff(ctx context.Context, from, to Ref, path string) (*DiffIter, error) {
+func (s *Session) Diff(ctx context.Context, from, to Ref, path string) (_ *DiffIter, err error) {
+	defer s.db.scrubInto(ctx, &err)
 	if err := s.ready(); err != nil {
 		return nil, err
 	}
@@ -337,7 +346,7 @@ func (s *Session) Diff(ctx context.Context, from, to Ref, path string) (*DiffIte
 	}
 	switch {
 	case !ok[0] && !ok[1]:
-		return nil, fmt.Errorf("%w: no object by that name on either side", ErrNotFound)
+		return nil, fmt.Errorf("%w: no object %q on either side", ErrNotFound, path)
 	case ok[0] && ok[1] && refs[0].Model != refs[1].Model:
 		return nil, fmt.Errorf("%w: the object is of another kind on each side", ErrWrongKind)
 	}
@@ -355,7 +364,7 @@ func (s *Session) Diff(ctx context.Context, from, to Ref, path string) (*DiffIte
 	if err != nil {
 		return nil, err
 	}
-	d := &DiffIter{it: it}
+	d := &DiffIter{db: s.db, it: it}
 	switch {
 	case !ok[0]: // created: every part is an addition, whatever the model calls it against an empty object
 		d.only = Added
@@ -392,7 +401,8 @@ func (d *Database) empty(ctx context.Context, sc chunk.ReadWriter, m model.Model
 
 // Log lists commits reachable from ref, newest first, at most limit
 // (1..10,000).
-func (s *Session) Log(ctx context.Context, ref Ref, limit int) ([]CommitMeta, error) {
+func (s *Session) Log(ctx context.Context, ref Ref, limit int) (_ []CommitMeta, err error) {
+	defer s.db.scrubInto(ctx, &err)
 	if err := s.ready(); err != nil {
 		return nil, err
 	}
@@ -416,7 +426,8 @@ func (s *Session) Log(ctx context.Context, ref Ref, limit int) ([]CommitMeta, er
 
 // Begin opens a transaction on the session's branch, reading its working
 // set as of now.
-func (s *Session) Begin(ctx context.Context) (*Txn, error) {
+func (s *Session) Begin(ctx context.Context) (_ *Txn, err error) {
+	defer s.db.scrubInto(ctx, &err)
 	if err := s.ready(); err != nil {
 		return nil, err
 	}
@@ -435,12 +446,14 @@ func (s *Session) Close() error {
 
 // DiffIter walks one object's changes.
 type DiffIter struct {
+	db   *Database
 	it   model.DiffIter
 	only ChangeKind // for an object one side holds: every change is this
 }
 
 // Next is the next change; ok is false at the end.
 func (d *DiffIter) Next(ctx context.Context) (c Change, ok bool, err error) {
+	defer d.db.scrubInto(ctx, &err)
 	mc, ok, err := d.it.Next(ctx)
 	if err != nil || !ok {
 		return Change{}, false, err

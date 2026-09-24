@@ -122,3 +122,8 @@ func translate(err error) error {
 	}
 	return fmt.Errorf("%w (%w)", to, err)
 }
+
+// scrubInto is scrub for a deferred call over a named error result: every
+// exported call returns through it, so no path can hand a caller the core's
+// error.
+func scrubInto(ctx context.Context, l Logger, err *error) { *err = scrub(ctx, l, *err) }

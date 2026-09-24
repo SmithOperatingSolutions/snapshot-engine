@@ -1471,3 +1471,32 @@ find: if scopes == nil { // nothing to take back
 replace: if false { // nothing to take back
 pkg: ./engine
 run: ^TestRevokingFromAStrangerIsANoOp$
+
+# engine scrub at the API
+id: engine-session-is-scrubbed
+file: engine/database.go
+find: func (d *Database) Session(ctx context.Context, p Principal, branch string) (_ *Session, err error) {\n\tdefer d.scrubInto(ctx, &err)
+replace: func (d *Database) Session(ctx context.Context, p Principal, branch string) (_ *Session, err error) {\n\t// not scrubbed
+pkg: ./engine
+run: ^TestTheAPIsErrorsCarryNoNames$
+
+id: engine-checkout-is-scrubbed
+file: engine/session.go
+find: func (s *Session) Checkout(ctx context.Context, branch string) (err error) {\n\tdefer s.db.scrubInto(ctx, &err)
+replace: func (s *Session) Checkout(ctx context.Context, branch string) (err error) {\n\t// not scrubbed
+pkg: ./engine
+run: ^TestTheAPIsErrorsCarryNoNames$
+
+id: engine-diff-is-scrubbed
+file: engine/session.go
+find: func (s *Session) Diff(ctx context.Context, from, to Ref, path string) (_ *DiffIter, err error) {\n\tdefer s.db.scrubInto(ctx, &err)
+replace: func (s *Session) Diff(ctx context.Context, from, to Ref, path string) (_ *DiffIter, err error) {\n\t// not scrubbed
+pkg: ./engine
+run: ^TestTheAPIsErrorsCarryNoNames$
+
+id: engine-log-is-scrubbed
+file: engine/session.go
+find: func (s *Session) Log(ctx context.Context, ref Ref, limit int) (_ []CommitMeta, err error) {\n\tdefer s.db.scrubInto(ctx, &err)
+replace: func (s *Session) Log(ctx context.Context, ref Ref, limit int) (_ []CommitMeta, err error) {\n\t// not scrubbed
+pkg: ./engine
+run: ^TestTheAPIsErrorsCarryNoNames$
