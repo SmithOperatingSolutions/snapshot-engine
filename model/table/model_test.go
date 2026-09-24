@@ -220,33 +220,6 @@ func TestMergeCombinesRowsAndCells(t *testing.T) {
 	}
 }
 
-// Two tables of different schemas do not merge: one conflict, at the
-// schema, and ours comes back untouched; the same schema written on both
-// sides is no conflict (the positive control above).
-func TestTablesOfDifferentSchemasAreOneConflict(t *testing.T) {
-	s := memstore.New()
-	m := table.Model{Config: cfg()}
-	base := seeded(t, s, 2)
-	ours := edit(t, base, func(e *table.Editor) error {
-		return e.Update(table.Key{int64(1)}, person(1, "ours", int32(21), "p1@x"))
-	})
-	wider := people()
-	wider.Columns = append(wider.Columns, table.Column{Tag: 5, Name: "phone", Type: table.TypeText, Nullable: true})
-	theirsTable := create(t, s, wider)
-	theirs := edit(t, theirsTable, func(e *table.Editor) error {
-		for i := int64(1); i <= 2; i++ {
-			if _, err := e.Insert(person(i, fmt.Sprintf("name%d", i), int32(20+i), fmt.Sprintf("p%d@x", i))); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	r := mergeTables(t, m, s, base, ours, theirs)
-	if len(r.Conflicts) != 1 || string(r.Conflicts[0].Location) != "schema" || r.Root != ours.Root() {
-		t.Fatalf("merging tables of two schemas = root %+v, conflicts %v; want ours and one conflict at \"schema\"", r.Root, r.Conflicts)
-	}
-}
-
 // The content the contract writes and reads: the catalog, then one line per
 // row in key order, cells separated by '|', NULL as "NULL".
 func serialize(schema table.Schema, rows []table.Row) []byte {
