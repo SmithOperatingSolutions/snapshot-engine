@@ -257,6 +257,28 @@ func TestByteOrderIsTheTypesOrder(t *testing.T) {
 	}
 }
 
+// Negative numerics whose exponents are equal order by their digits,
+// reversed: -1.3 < -1.2 < -1.1 < -0.9. Random pairs rarely land on one
+// exponent with differing digits, so the property alone catches a wrong
+// digit complement only on some runs; these pairs catch it on every run.
+func TestNegativeNumericsOrderByTheirDigits(t *testing.T) {
+	c := table.Column{Tag: 1, Name: "n", Type: table.TypeNumeric}
+	ascending := []string{"-13", "-12.5", "-1.3", "-1.2", "-1.1", "-0.9", "-0.12", "-0.11", "0", "0.11", "1.1"}
+	for i := 1; i < len(ascending); i++ {
+		lo, err := table.ParseNumeric(ascending[i-1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		hi, err := table.ParseNumeric(ascending[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Compare(enc(t, c, lo), enc(t, c, hi)) >= 0 {
+			t.Errorf("%s does not encode below %s: a numeric's byte order is not its order", ascending[i-1], ascending[i])
+		}
+	}
+}
+
 // A value that does not fit its column is refused with ErrValue and no
 // bytes: the wrong Go type, NULL in a column that forbids it, a varchar of
 // 300 characters in a varchar(255) (bytes are not characters: 255 three-byte

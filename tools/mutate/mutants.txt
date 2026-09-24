@@ -304,7 +304,7 @@ file: model/table/cell.go
 find: for _, d := range digits {\n\t\t\tb = append(b, 10-d)\n\t\t}
 replace: for _, d := range digits {\n\t\t\tb = append(b, d+1)\n\t\t}
 pkg: ./model/table
-run: ^TestByteOrderIsTheTypesOrder$
+run: ^TestNegativeNumericsOrderByTheirDigits$
 
 id: table-strings-escape-their-zeros
 file: model/table/cell.go
