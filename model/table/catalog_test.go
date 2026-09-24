@@ -131,12 +131,18 @@ func TestForgedCatalogsAreRefused(t *testing.T) {
 		t.Fatalf("positive control: %v", err)
 	}
 	forged := map[string][]byte{
-		"empty":                {},
-		"wrong magic":          append([]byte("VDTX"), good[4:]...),
-		"version 2":            append(append([]byte("VDTC"), 2, 0), good[6:]...),
-		"trailing byte":        append(bytes.Clone(good), 0),
-		"a non-minimal length": append(append(bytes.Clone(good[:6]), 0x84, 0x00), good[7:]...), // the column count 4 spelled in two bytes
-		"a nullable key":       bytes.Replace(good, []byte{byte(table.TypeInt8), 0, 0, 0, 0, 0}, []byte{byte(table.TypeInt8), 1, 0, 0, 0, 0}, 1),
+		"empty":                  {},
+		"wrong magic":            append([]byte("VDTX"), good[4:]...),
+		"version 2":              append(append([]byte("VDTC"), 2, 0), good[6:]...),
+		"trailing byte":          append(bytes.Clone(good), 0),
+		"a non-minimal length":   append(append(bytes.Clone(good[:6]), 0x84, 0x00), good[7:]...), // the column count 4 spelled in two bytes
+		"a nullable key":         bytes.Replace(good, []byte{byte(table.TypeInt8), 0, 0, 0, 0, 0}, []byte{byte(table.TypeInt8), 1, 0, 0, 0, 0}, 1),
+		"a nullable byte of 2":   bytes.Replace(good, []byte{byte(table.TypeInt8), 0, 0, 0, 0, 0}, []byte{byte(table.TypeInt8), 2, 0, 0, 0, 0}, 1),
+		"columns over the limit": append(binary.AppendUvarint(bytes.Clone(good[:6]), table.MaxColumns+1), good[7:]...),
+		// by hand: no columns, then a count over its limit
+		"a key over the limit":           binary.AppendUvarint([]byte("VDTC\x01\x00\x00"), table.MaxColumns+1),
+		"indexes over the limit":         binary.AppendUvarint([]byte("VDTC\x01\x00\x00\x00"), table.MaxIndexes+1),
+		"an index over the column limit": binary.AppendUvarint([]byte("VDTC\x01\x00\x00\x00\x01\x0a\x00"), table.MaxColumns+1),
 	}
 	for i := 1; i < len(good); i += 3 {
 		forged["truncated to "+string(rune('0'+i%10))+" bytes, at "+string(rune('a'+i%26))] = good[:i]

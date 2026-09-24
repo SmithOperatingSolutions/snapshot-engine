@@ -1791,3 +1791,17 @@ find: n, err := document.Parse(text)
 replace: n, err := document.Parse([]byte("{}"))
 pkg: ./e2e
 run: ^TestAProgramDrivesADatabaseThroughTheEngineAlone$
+
+id: table-a-nullable-byte-is-0-or-1
+file: model/table/table.go
+find: case nullable != 0:\n\t\t\treturn Schema{}, corrupt("nullable byte %d", nullable)
+replace: case false:\n\t\t\treturn Schema{}, corrupt("nullable byte %d", nullable)
+pkg: ./model/table
+run: ^TestForgedCatalogsAreRefused$
+
+id: table-a-root-lists-its-catalogs-indexes
+file: model/table/store.go
+find: if len(rec.indexes) != len(schema.Indexes) {
+replace: if len(rec.indexes) != len(schema.Indexes) && false {
+pkg: ./model/table
+run: ^TestTheRootIsTheDocumentedRecord$

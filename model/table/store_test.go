@@ -353,6 +353,11 @@ func TestTheRootIsTheDocumentedRecord(t *testing.T) {
 		"wrong magic":   append([]byte("VDTX"), want[4:]...),
 		"version 2":     append(append([]byte("VDTR"), 2, 0), want[6:]...),
 		"trailing byte": append(bytes.Clone(want), 0),
+		"indexes over the limit": func() []byte {
+			i := len(want) - (2 + 32 + 8) - 1 // the index count, one byte before the one index
+			return append(binary.AppendUvarint(bytes.Clone(want[:i]), table.MaxIndexes+1), want[i+1:]...)
+		}(),
+		"fewer indexes than the catalog": table.EncodeRoot(catalog, p, 7, nil),
 		"a catalog that is garbage": func() []byte {
 			b := bytes.Clone(want)
 			b[7] ^= 0xFF
