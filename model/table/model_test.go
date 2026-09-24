@@ -132,7 +132,8 @@ func conflictLocations(r model.MergeResult) []string {
 
 // Rows merge independently and cells within a row too: two branches that
 // change different cells of one row both land, a row deleted on one side
-// and untouched on the other is gone, rows added on each side are both
+// and untouched on the other is gone (row 6, deleted by theirs alone; row 2,
+// by ours alone), rows added on each side are both
 // there, and identical changes are taken once. A cell changed differently
 // on both sides is a conflict at that cell alone, a row deleted on one side
 // and changed on the other a conflict at that row; a conflicted merge
@@ -149,9 +150,6 @@ func TestMergeCombinesRowsAndCells(t *testing.T) {
 			return err
 		}
 		if err := e.Update(table.Key{int64(5)}, person(5, "same", int32(25), "p5@x")); err != nil {
-			return err
-		}
-		if err := e.Delete(table.Key{int64(6)}); err != nil {
 			return err
 		}
 		_, err := e.Insert(person(7, "seven", int32(27), "p7@x"))
@@ -254,7 +252,7 @@ func TestTablesOfDifferentSchemasAreOneConflict(t *testing.T) {
 func serialize(schema table.Schema, rows []table.Row) []byte {
 	catalog, _ := table.EncodeCatalog(schema)
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%x\n", catalog))
+	fmt.Fprintf(&sb, "%x\n", catalog)
 	for _, r := range rows {
 		var cells []string
 		for _, c := range schema.Columns {
@@ -385,5 +383,36 @@ func TestWalkNamesALongCellsChunks(t *testing.T) {
 	}
 	if err := m.Validate(ctx, tb.Root(), kept); err != nil {
 		t.Fatalf("from the chunks Walk names alone, a table with a long cell does not validate: %v", err)
+	}
+}
+
+// Cells of the byte types compare by content: a bytea changed is a change
+// at that cell, a jsonb rewritten with the same bytes is none.
+func TestByteCellsDiffByContent(t *testing.T) {
+	s := memstore.New()
+	m := table.Model{Config: cfg()}
+	schema := table.Schema{Columns: []table.Column{
+		{Tag: 1, Name: "id", Type: table.TypeInt4},
+		{Tag: 2, Name: "blob", Type: table.TypeBytea},
+		{Tag: 3, Name: "doc", Type: table.TypeJSONB},
+	}, PrimaryKey: []table.Tag{1}}
+	base := edit(t, create(t, s, schema), func(e *table.Editor) error {
+		_, err := e.Insert(table.Row{1: int32(1), 2: []byte{1, 2}, 3: table.JSONB(`{"a":1}`)})
+		return err
+	})
+	next := edit(t, base, func(e *table.Editor) error {
+		return e.Update(table.Key{int32(1)}, table.Row{1: int32(1), 2: []byte{1, 3}, 3: table.JSONB(`{"a":1}`)})
+	})
+	got := diff(t, m, s, base.Root(), next.Root())
+	loc, err := base.Locate(table.Key{int32(1)}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[string(loc)] != model.Modified {
+		t.Fatalf("Diff = %v, want one change at the blob cell", got)
+	}
+	other := create(t, s, people())
+	if _, err := m.Diff(ctx, base.Root(), other.Root(), s); err == nil {
+		t.Fatal("Diff of two tables with different schemas did not fail")
 	}
 }

@@ -7,3 +7,173 @@
 #   replace: <text>
 #   pkg: ./<package>
 #   run: ^TestName$
+
+# model/table
+
+id: table-varchar-needs-a-length
+file: model/table/table.go
+find: case c.Type == TypeVarchar && (c.MaxLen == 0 || c.MaxLen > MaxVarcharLen):
+replace: case false:
+pkg: ./model/table
+run: ^TestSchemasThatCannotBeATablesAreRefused$
+
+id: table-catalog-refuses-trailing-bytes
+file: model/table/table.go
+find: if err := r.done(); err != nil {\n\t\treturn Schema{}, err\n\t}
+replace: if err := r.done(); err != nil && false {\n\t\treturn Schema{}, err\n\t}
+pkg: ./model/table
+run: ^TestForgedCatalogsAreRefused$
+
+id: table-varint-must-be-minimal
+file: model/table/wire.go
+find: if n > 1 && r.b[r.off+n-1] == 0 {
+replace: if false {
+pkg: ./model/table
+run: ^TestForgedCatalogsAreRefused$
+
+id: table-varchar-counts-characters
+file: model/table/cell.go
+find: if n := utf8.RuneCountInString(x); n > int(c.MaxLen) {
+replace: if n := utf8.RuneCountInString(x); n > int(c.MaxLen)+1000 {
+pkg: ./model/table
+run: ^TestValuesThatDoNotFitAreRefused$
+
+id: table-null-needs-a-nullable-column
+file: model/table/cell.go
+find: if !c.Nullable {\n\t\t\treturn nil, fmt.Errorf("%w: NULL in column %q, which is not nullable", ErrValue, c.Name)
+replace: if !c.Nullable && false {\n\t\t\treturn nil, fmt.Errorf("%w: NULL in column %q, which is not nullable", ErrValue, c.Name)
+pkg: ./model/table
+run: ^TestValuesThatDoNotFitAreRefused$
+
+id: table-nan-sorts-above-everything
+file: model/table/cell.go
+find: if math.IsNaN(f) {\n\t\treturn math.MaxUint64\n\t}
+replace: if math.IsNaN(f) && false {\n\t\treturn math.MaxUint64\n\t}
+pkg: ./model/table
+run: ^TestByteOrderIsTheTypesOrder$
+
+id: table-int2-flips-the-sign-bit
+file: model/table/cell.go
+find: b = binary.BigEndian.AppendUint16(b, uint16(x)^0x8000)
+replace: b = binary.BigEndian.AppendUint16(b, uint16(x))
+pkg: ./model/table
+run: ^TestByteOrderIsTheTypesOrder$
+
+id: table-negative-numeric-complements-its-digits
+file: model/table/cell.go
+find: for _, d := range digits {\n\t\t\tb = append(b, 10-d)\n\t\t}
+replace: for _, d := range digits {\n\t\t\tb = append(b, d+1)\n\t\t}
+pkg: ./model/table
+run: ^TestByteOrderIsTheTypesOrder$
+
+id: table-strings-escape-their-zeros
+file: model/table/cell.go
+find: b = append(b, 0x00, 0xFF)
+replace: b = append(b, 0x00, 0x01)
+pkg: ./model/table
+run: ^TestEveryTypeRoundTrips$
+
+id: table-varchar-decoded-within-its-length
+file: model/table/cell.go
+find: if c.Type == TypeVarchar && utf8.RuneCount(s) > int(c.MaxLen) {
+replace: if c.Type == TypeVarchar && utf8.RuneCount(s) > int(c.MaxLen) && false {
+pkg: ./model/table
+run: ^TestForgedCellsAreRefused$
+
+id: table-insert-refuses-a-duplicate-key
+file: model/table/store.go
+find: } else if ok {\n\t\treturn nil, fmt.Errorf("%w: %v", ErrDuplicate, key)
+replace: } else if ok && false {\n\t\treturn nil, fmt.Errorf("%w: %v", ErrDuplicate, key)
+pkg: ./model/table
+run: ^TestWritesThatDoNotFitAreRefusedAndWriteNothing$
+
+id: table-delete-refuses-a-missing-key
+file: model/table/store.go
+find: } else if !ok {\n\t\treturn fmt.Errorf("%w: %v", ErrNotFound, key)\n\t}\n\te.set(kb, &pendingRow{key: key})
+replace: } else if !ok && false {\n\t\treturn fmt.Errorf("%w: %v", ErrNotFound, key)\n\t}\n\te.set(kb, &pendingRow{key: key})
+pkg: ./model/table
+run: ^TestWritesThatDoNotFitAreRefusedAndWriteNothing$
+
+id: table-refuses-a-column-the-schema-lacks
+file: model/table/store.go
+find: if _, _, ok := t.schema.column(tag); !ok {\n\t\t\treturn nil, fmt.Errorf("%w: the schema has no column %d", ErrValue, tag)
+replace: if _, _, ok := t.schema.column(tag); !ok && false {\n\t\t\treturn nil, fmt.Errorf("%w: the schema has no column %d", ErrValue, tag)
+pkg: ./model/table
+run: ^TestWritesThatDoNotFitAreRefusedAndWriteNothing$
+
+id: table-key-within-the-maps-limit
+file: model/table/store.go
+find: if len(b) > prolly.MaxKeySize {\n\t\treturn nil, fmt.Errorf("%w: a key of %d bytes, over %d", ErrValue, len(b), prolly.MaxKeySize)
+replace: if len(b) > prolly.MaxKeySize && false {\n\t\treturn nil, fmt.Errorf("%w: a key of %d bytes, over %d", ErrValue, len(b), prolly.MaxKeySize)
+pkg: ./model/table
+run: ^TestWritesThatDoNotFitAreRefusedAndWriteNothing$
+
+id: table-flush-removes-the-old-index-entries
+file: model/table/store.go
+find: if err := ies[ix.Tag].Delete(ik); err != nil {
+replace: if err := ies[ix.Tag].Delete(append(ik, 0)); err != nil {
+pkg: ./model/table
+run: ^TestAnIndexReturnsWhatAScanWithAFilterReturns$
+
+id: table-row-ids-are-random
+file: model/table/store.go
+find: if _, err := rand.Read(id[:]); err != nil {
+replace: if _, err := rand.Read(id[:0]); err != nil {
+pkg: ./model/table
+run: ^TestATableWithoutAKeyGetsHiddenRowIDs$
+
+id: table-root-size-is-the-row-count
+file: model/table/store.go
+find: t.root = model.Root{Hash: h, Size: t.primary.Count(), Format: Format}
+replace: t.root = model.Root{Hash: h, Size: 0, Format: Format}
+pkg: ./model/table
+run: ^TestRowsRoundTripByPrimaryKey$
+
+id: table-root-record-indexes-are-the-catalogs
+file: model/table/store.go
+find: if ix.tag != schema.Indexes[i].Tag {
+replace: if ix.tag != schema.Indexes[i].Tag && false {
+pkg: ./model/table
+run: ^TestTheRootIsTheDocumentedRecord$
+
+id: table-root-record-indexes-are-as-full-as-the-rows
+file: model/table/store.go
+find: if ix.count != rec.primary.count {
+replace: if ix.count != rec.primary.count && false {
+pkg: ./model/table
+run: ^TestTheRootIsTheDocumentedRecord$
+
+id: table-diff-skips-unchanged-cells
+file: model/table/model.go
+find: if d.t.isKeyColumn(col.Tag) || sameCell(from[col.Tag], to[col.Tag]) {
+replace: if d.t.isKeyColumn(col.Tag) || sameCell(from[col.Tag], to[col.Tag]) || true {
+pkg: ./model/table
+run: ^TestDiffIsPerRowThenPerCell$
+
+id: table-cells-changed-differently-conflict
+file: model/table/model.go
+find: case sameCell(theirs, base):\n\t\treturn ours, false\n\t}\n\treturn nil, true
+replace: case sameCell(theirs, base):\n\t\treturn ours, false\n\t}\n\treturn ours, false
+pkg: ./model/table
+run: ^TestMergeCombinesRowsAndCells$
+
+id: table-deleted-against-changed-conflicts
+file: model/table/model.go
+find: return []model.Conflict{{Location: bytes.Clone(co.Key), Reason: "deleted on one side and changed on the other"}}, nil
+replace: return nil, nil
+pkg: ./model/table
+run: ^TestMergeCombinesRowsAndCells$
+
+id: table-two-schemas-are-one-conflict
+file: model/table/model.go
+find: if !bytes.Equal(ts[0].catalog, ts[1].catalog) || !bytes.Equal(ts[0].catalog, ts[2].catalog) {
+replace: if false {
+pkg: ./model/table
+run: ^TestTablesOfDifferentSchemasAreOneConflict$
+
+id: table-walk-names-the-index-maps
+file: model/table/model.go
+find: for _, ix := range rec.indexes {\n\t\tif err := prolly.Walk(ctx, r, m.Config, hash.Hash(ix.root), visit, nil); err != nil {\n\t\t\treturn err\n\t\t}\n\t}
+replace: for range rec.indexes {\n\t}
+pkg: ./model/table
+run: ^TestContract$

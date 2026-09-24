@@ -13,6 +13,7 @@ import (
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk/memstore"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/hash"
+	"github.com/SmithOperatingSolutions/snapshot-core/core/model"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/prolly"
 	"github.com/SmithOperatingSolutions/snapshot-engine/model/table"
 )
@@ -132,11 +133,20 @@ func TestRowsRoundTripByPrimaryKey(t *testing.T) {
 		t.Fatalf("Scan's third row is %v, want cara's", scanned[2])
 	}
 	e = tb.Edit()
-	if err := e.Update(table.Key{int64(20)}, person(20, "bob", int32(8), "bob@x")); err != nil {
+	if err := e.Update(table.Key{int64(20)}, person(20, "bob", int32(9), "bob@x")); err != nil {
 		t.Fatalf("Update: %v", err)
+	}
+	if err := e.Update(table.Key{int64(20)}, person(20, "bob", int32(8), "bob@x")); err != nil { // the second edit of a row in one editor sees the first
+		t.Fatalf("a second Update: %v", err)
 	}
 	if err := e.Delete(table.Key{int64(30)}); err != nil {
 		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := e.Insert(person(30, "cara again", nil, "c2@x")); err != nil { // a key deleted in this editor may be inserted again
+		t.Fatalf("Insert after Delete in one editor: %v", err)
+	}
+	if err := e.Delete(table.Key{int64(30)}); err != nil {
+		t.Fatalf("Delete again: %v", err)
 	}
 	tb = flush(t, e)
 	if got, ok, _ := tb.Get(ctx, table.Key{int64(20)}); !ok || got[3] != int32(8) || got[4] != "bob@x" {
@@ -382,4 +392,81 @@ func FuzzDecodeRoot(f *testing.F) {
 			t.Fatalf("a root record that decoded re-encodes differently")
 		}
 	})
+}
+
+// An index that drifted from the rows is refused: an entry naming a row the
+// table lacks, or an entry carrying a value, fails Validate and the lookup
+// that meets it; a root record whose count disagrees with its map, or a root
+// chunk that is not a record at all, fails Open and Walk.
+func TestAnIndexThatDriftedFromTheRowsIsRefused(t *testing.T) {
+	s := memstore.New()
+	m := table.Model{Config: cfg()}
+	tb := seeded(t, s, 4)
+	rec, err := s.Get(ctx, tb.Root().Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, primary, rows, indexes, err := table.DecodeRoot(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ixMap, err := prolly.Open(ctx, s, cfg(), indexes[0].Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	it, err := ixMap.IterRange(ctx, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _, _, err := it.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	forge := func(name string, edit func(e *prolly.Editor) error, wantErr string) {
+		t.Helper()
+		e := ixMap.Editor()
+		if err := edit(e); err != nil {
+			t.Fatal(err)
+		}
+		forged, err := e.Flush(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		root := table.EncodeRoot(catalog, primary, rows, []table.IndexRoot{{Tag: 10, Root: forged.Root(), Count: forged.Count()}})
+		h, err := s.Put(ctx, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = m.Validate(ctx, model.Root{Hash: h, Size: rows, Format: table.Format}, s)
+		if err == nil || !strings.Contains(err.Error(), wantErr) {
+			t.Errorf("%s: Validate = %v, want an error saying %q", name, err, wantErr)
+		}
+	}
+	fake := append(bytes.Clone(first[:len(first)-9]), first[len(first)-9:]...) // the same age cell, then a key of our own
+	binary.BigEndian.PutUint64(fake[len(fake)-8:], (1<<63)|77)                 // key 77, no such row
+	forge("an entry naming a row the table lacks", func(e *prolly.Editor) error {
+		if err := e.Delete(first); err != nil {
+			return err
+		}
+		return e.Put(fake, nil)
+	}, "names a row that is not in the table")
+	forge("an entry with a value", func(e *prolly.Editor) error { return e.Put(first, []byte{1}) }, "an index entry with a value")
+	lying := table.EncodeRoot(catalog, primary, rows+1, []table.IndexRoot{{Tag: 10, Root: indexes[0].Root, Count: rows + 1}})
+	h, err := s.Put(ctx, lying)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := table.Open(ctx, s, cfg(), model.Root{Hash: h, Size: rows + 1, Format: table.Format}); !errors.Is(err, chunk.ErrCorrupt) {
+		t.Errorf("Open of a root record claiming one row more than its map holds: %v, want ErrCorrupt", err)
+	}
+	garbage, err := s.Put(ctx, []byte("not a table"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Walk(ctx, model.Root{Hash: garbage, Format: table.Format}, s, func(hash.Hash, bool) (bool, error) { return true, nil }); !errors.Is(err, chunk.ErrCorrupt) {
+		t.Errorf("Walk of a root chunk that is not a record: %v, want ErrCorrupt", err)
+	}
+	if got := table.Type(99).String(); got != "type(99)" {
+		t.Errorf("Type(99).String() = %q", got)
+	}
 }

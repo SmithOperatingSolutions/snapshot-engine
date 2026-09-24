@@ -113,16 +113,7 @@ func Open(ctx context.Context, s chunk.ReadWriter, cfg prolly.Config, root model
 	if t.primary, err = openMap(ctx, s, cfg, r.primary); err != nil {
 		return nil, err
 	}
-	if len(r.indexes) != len(schema.Indexes) {
-		return nil, fmt.Errorf("%w: a root record of %d indexes for a schema of %d", chunk.ErrCorrupt, len(r.indexes), len(schema.Indexes))
-	}
-	for i, ix := range schema.Indexes {
-		if r.indexes[i].tag != ix.Tag {
-			return nil, fmt.Errorf("%w: the root record's index %d is tag %d, the schema's is %d", chunk.ErrCorrupt, i, r.indexes[i].tag, ix.Tag)
-		}
-		if r.indexes[i].count != r.primary.count {
-			return nil, fmt.Errorf("%w: index %d holds %d entries for %d rows", chunk.ErrCorrupt, ix.Tag, r.indexes[i].count, r.primary.count)
-		}
+	for i, ix := range schema.Indexes { // decodeRoot holds the record's indexes to the catalog's, in order, each as full as the primary map
 		if t.indexes[ix.Tag], err = openMap(ctx, s, cfg, r.indexes[i]); err != nil {
 			return nil, err
 		}
@@ -548,6 +539,26 @@ func sameCell(a, b any) bool {
 		return ok && bytes.Equal(x, y)
 	}
 	return a == b
+}
+
+// put sets the row with encoded key kb, whatever was there.
+func (e *Editor) put(kb []byte, key Key, row Row) error {
+	vb, err := e.t.encodeValue(row)
+	if err != nil {
+		return err
+	}
+	e.set(kb, &pendingRow{key: key, row: cloneRow(row, key, e.t), vb: vb})
+	return nil
+}
+
+// remove deletes the row with encoded key kb, if any.
+func (e *Editor) remove(kb []byte) error {
+	key, err := e.t.decodeKey(kb)
+	if err != nil {
+		return err
+	}
+	e.set(kb, &pendingRow{key: key})
+	return nil
 }
 
 // Delete removes the row with key (ErrNotFound if absent).

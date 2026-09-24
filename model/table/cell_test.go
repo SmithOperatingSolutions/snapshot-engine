@@ -166,7 +166,8 @@ func genNumeric(t *rapid.T) any {
 
 func specials64(t *rapid.T) any {
 	if rapid.IntRange(0, 9).Draw(t, "special") == 0 {
-		return rapid.SampledFrom([]float64{math.NaN(), math.Inf(1), math.Inf(-1), 0, math.Copysign(0, -1), math.MaxFloat64, math.SmallestNonzeroFloat64}).Draw(t, "s")
+		negNaN := math.Float64frombits(0xFFF8000000000001) // a NaN with the sign bit set: one NaN like any other
+		return rapid.SampledFrom([]float64{math.NaN(), negNaN, math.Inf(1), math.Inf(-1), 0, math.Copysign(0, -1), math.MaxFloat64, math.SmallestNonzeroFloat64}).Draw(t, "s")
 	}
 	return rapid.Float64().Draw(t, "f")
 }
@@ -293,6 +294,13 @@ func TestValuesThatDoNotFitAreRefused(t *testing.T) {
 			t.Errorf("%s: EncodeCell = %x, %v; want no bytes and ErrValue", name, b, err)
 		}
 	}
+	// Every type refuses a value of another Go type, with ErrValue.
+	for _, tc := range typeCases() {
+		var wrong any = struct{}{}
+		if b, err := table.EncodeCell(tc.c, wrong); !errors.Is(err, table.ErrValue) || b != nil {
+			t.Errorf("%s given a struct: EncodeCell = %x, %v; want no bytes and ErrValue", tc.c.Type, b, err)
+		}
+	}
 	for in, want := range map[string]string{"1.50": "1.5", "-0": "0", "01": "1", "1.": "1", ".5": "0.5", "1e5": "100000", "1.5e3": "1500", "-0.0010": "-0.001", "12345678901234567890": "12345678901234567890", "1E-2": "0.01"} {
 		got, err := table.ParseNumeric(in)
 		if err != nil || string(got) != want {
@@ -338,6 +346,15 @@ func TestForgedCellsAreRefused(t *testing.T) {
 	} {
 		if v, _, err := table.DecodeCell(tc.b, tc.c); err == nil {
 			t.Errorf("%s: DecodeCell accepted %x as %#v", name, tc.b, v)
+		}
+	}
+	// Every type refuses a value cut short after its marker, and one cut to
+	// a single byte.
+	for _, tc := range typeCases() {
+		for _, b := range [][]byte{{0x01}, {0x01, 0x80}} {
+			if v, _, err := table.DecodeCell(b, tc.c); err == nil {
+				t.Errorf("%s: DecodeCell accepted the cut-short cell %x as %#v", tc.c.Type, b, v)
+			}
 		}
 	}
 }
