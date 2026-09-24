@@ -1,6 +1,7 @@
 package kv_test
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"testing"
@@ -60,7 +61,11 @@ func TestMergeIsThreeWayPerKey(t *testing.T) {
 	}
 	locs := map[string]string{}
 	for _, c := range res.Conflicts {
-		locs[string(c.Location)] = c.Reason
+		key, sub, err := kv.ParseLocation(c.Location)
+		if err != nil || len(sub) != 0 {
+			t.Fatalf("a conflict at %q (%v), want at a key as a whole", c.Location, err)
+		}
+		locs[string(key)] = c.Reason
 	}
 	if len(res.Conflicts) != 2 || locs["both-differ"] == "" || locs["del-vs-edit"] == "" {
 		t.Fatalf("conflicts at %v, want exactly both-differ and del-vs-edit, each with a reason", locs)
@@ -140,7 +145,7 @@ func TestMergeDeletesForTheirsAndNamesAnAddedTwiceKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
-	if len(res.Conflicts) != 1 || string(res.Conflicts[0].Location) != "new" || !strings.Contains(res.Conflicts[0].Reason, "added") {
+	if len(res.Conflicts) != 1 || !bytes.Equal(res.Conflicts[0].Location, kv.Location([]byte("new"), nil)) || !strings.Contains(res.Conflicts[0].Reason, "added") {
 		t.Fatalf("conflicts %+v, want one at new saying both sides added it", res.Conflicts)
 	}
 	theirs = write(t, s, map[string]kv.Value{"keep": bytesValue("k")})

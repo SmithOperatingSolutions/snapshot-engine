@@ -219,7 +219,7 @@ func TestBranchesSettingOneKeyToTwoValuesConflictOnThatKeyAlone(t *testing.T) {
 	if len(res.Conflicts) != 1 || res.Conflicts[0].Path != h.path {
 		t.Fatalf("the merge reported %d conflicts %+v, want one at %s", len(res.Conflicts), res.Conflicts, h.path)
 	}
-	if c := res.Conflicts[0].Model; len(c) != 1 || string(c[0].Location) != "a" {
+	if c := res.Conflicts[0].Model; len(c) != 1 || !bytes.Equal(c[0].Location, kv.Location([]byte("a"), nil)) {
 		t.Fatalf("the conflict names keys %+v, want the one key a", c)
 	}
 }

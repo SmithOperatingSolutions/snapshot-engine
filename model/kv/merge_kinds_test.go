@@ -1,6 +1,8 @@
 package kv_test
 
 import (
+	"errors"
+	"github.com/SmithOperatingSolutions/snapshot-core/core/prolly"
 	"strings"
 	"testing"
 
@@ -39,14 +41,18 @@ func clean(t *testing.T, res model.MergeResult, what string) {
 	}
 }
 
-func oneConflict(t *testing.T, res model.MergeResult, key, reason string) {
+// oneConflict wants exactly one conflict, at key and below it at sub (a
+// hash field, a sorted-set member; "" for the key as a whole), its reason
+// saying reason.
+func oneConflict(t *testing.T, res model.MergeResult, key, sub, reason string) {
 	t.Helper()
 	if len(res.Conflicts) != 1 {
-		t.Fatalf("%d conflicts %+v, want one at %q", len(res.Conflicts), res.Conflicts, key)
+		t.Fatalf("%d conflicts %+v, want one at %q/%q", len(res.Conflicts), res.Conflicts, key, sub)
 	}
 	c := res.Conflicts[0]
-	if string(c.Location) != key || !strings.Contains(c.Reason, reason) {
-		t.Fatalf("conflict at %q: %q; want at %q saying %q", c.Location, c.Reason, key, reason)
+	k, below, err := kv.ParseLocation(c.Location)
+	if err != nil || string(k) != key || string(below) != sub || !strings.Contains(c.Reason, reason) {
+		t.Fatalf("conflict at %q (%q/%q, %v): %q; want at %q/%q saying %q", c.Location, k, below, err, c.Reason, key, sub, reason)
 	}
 }
 
@@ -102,11 +108,25 @@ func TestAHashMergesPerField(t *testing.T) {
 	res, _ = merged(t, base,
 		map[string]*kv.Value{"user:1": ptr(fields("name", "ann", "mail", "ours@x", "age", "30"))},
 		map[string]*kv.Value{"user:1": ptr(fields("name", "ann", "mail", "theirs@x", "age", "30"))})
-	oneConflict(t, res, "user:1", `field "mail"`)
+	oneConflict(t, res, "user:1", "mail", "changed differently")
 	res, _ = merged(t, base,
 		map[string]*kv.Value{"user:1": ptr(fields("name", "ann", "mail", "a@x"))},              // ours deletes age
 		map[string]*kv.Value{"user:1": ptr(fields("name", "ann", "mail", "a@x", "age", "31"))}) // theirs changes it
-	oneConflict(t, res, "user:1", `field "age"`)
+	oneConflict(t, res, "user:1", "age", "deleted")
+	res, _ = merged(t, base, // two fields changed two ways: two conflicts, one at each field
+		map[string]*kv.Value{"user:1": ptr(fields("name", "o", "mail", "o@x", "age", "30"))},
+		map[string]*kv.Value{"user:1": ptr(fields("name", "t", "mail", "t@x", "age", "30"))})
+	at := map[string]bool{}
+	for _, c := range res.Conflicts {
+		k, sub, err := kv.ParseLocation(c.Location)
+		if err != nil || string(k) != "user:1" {
+			t.Fatalf("a field conflict at %q (%v), want below user:1", c.Location, err)
+		}
+		at[string(sub)] = true
+	}
+	if len(res.Conflicts) != 2 || !at["name"] || !at["mail"] {
+		t.Fatalf("conflicts %+v, want one at name and one at mail", res.Conflicts)
+	}
 }
 
 // E3: a sorted set merges per member and keeps its order by score then
@@ -130,7 +150,7 @@ func TestASortedSetKeepsItsOrderAcrossAMerge(t *testing.T) {
 	res, _ = merged(t, base,
 		map[string]*kv.Value{"board": ptr(zset(scored("ann", 1, 1), scored("bob", 3, 2)))},
 		map[string]*kv.Value{"board": ptr(zset(scored("ann", 1, 1), scored("bob", 4, 2)))})
-	oneConflict(t, res, "board", `member "bob"`)
+	oneConflict(t, res, "board", "bob", "changed differently")
 	res, got = merged(t, base,
 		map[string]*kv.Value{"board": ptr(zset(scored("bob", 2, 2)))},                                           // ours removes ann
 		map[string]*kv.Value{"board": ptr(zset(scored("ann", 1, 1), scored("ann", 9, 7), scored("bob", 2, 2)))}) // theirs adds ann again under tag 7
@@ -158,7 +178,7 @@ func TestASequenceWithConcurrentInsertsMergesDeterministically(t *testing.T) {
 		t.Fatalf("with the sides swapped the queue merged to %+v, not the same %+v", got2["queue"], got["queue"])
 	}
 	res, _ = merged(t, base, map[string]*kv.Value{"queue": ptr(seq("a", "B", "c"))}, map[string]*kv.Value{"queue": ptr(seq("a", "c"))})
-	oneConflict(t, res, "queue", "sequence")
+	oneConflict(t, res, "queue", "", "sequence")
 }
 
 // E3: a value changed to different kinds on both sides is a conflict; the
@@ -167,14 +187,40 @@ func TestASequenceWithConcurrentInsertsMergesDeterministically(t *testing.T) {
 func TestAKindChangedOnOneSideConflicts(t *testing.T) {
 	base := map[string]kv.Value{"k": bytesValue("1")}
 	res, _ := merged(t, base, map[string]*kv.Value{"k": ptr(counter(1))}, map[string]*kv.Value{"k": ptr(bytesValue("2"))})
-	oneConflict(t, res, "k", "kind")
+	oneConflict(t, res, "k", "", "kind")
 	res, _ = merged(t, base, map[string]*kv.Value{"k": ptr(counter(1))}, map[string]*kv.Value{"k": ptr(set(member("m", 1)))})
-	oneConflict(t, res, "k", "kind")
+	oneConflict(t, res, "k", "", "kind")
 	res, got := merged(t, base, map[string]*kv.Value{"k": ptr(counter(1))}, map[string]*kv.Value{"k": ptr(counter(1))})
 	clean(t, res, "the same new kind and value on both sides")
 	if !sameValue(t, got["k"], counter(1)) {
 		t.Fatalf("k merged to %+v, want the counter both sides set", got["k"])
 	}
 	res, _ = merged(t, base, map[string]*kv.Value{"k": ptr(counter(1))}, map[string]*kv.Value{"k": ptr(counter(2))})
-	oneConflict(t, res, "k", "differently")
+	oneConflict(t, res, "k", "", "differently")
+}
+
+// A stored value that does not decode is a broken object, not a
+// disagreement: met mid-merge on a key both sides changed, the merge fails
+// with ErrValue and nothing is merged.
+func TestAFrameThatDoesNotDecodeMidMergeIsAnError(t *testing.T) {
+	s := memstore.New()
+	m := kv.Model{Config: cfg()}
+	base := write(t, s, map[string]kv.Value{"k": bytesValue("b")})
+	theirs := write(t, s, map[string]kv.Value{"k": bytesValue("t")})
+	pm, err := prolly.Empty(ctx, s, cfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := pm.Editor()
+	if err := e.Put([]byte("k"), []byte{0x7f, 'x'}); err != nil {
+		t.Fatal(err)
+	}
+	if pm, err = e.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ours := model.Root{Hash: pm.Root(), Size: 1, Format: kv.Format}
+	res, err := m.Merge(ctx, base, ours, theirs, s)
+	if !errors.Is(err, kv.ErrValue) {
+		t.Fatalf("a merge meeting a frame that does not decode = %+v, %v; want ErrValue", res, err)
+	}
 }
