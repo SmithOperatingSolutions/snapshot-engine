@@ -515,3 +515,24 @@ find: return model.Root{}, fmt.Errorf("record %q: %w", id, err)
 replace: continue
 pkg: ./model/document
 run: ^TestWriteRefusesABadIDOrRecord$
+
+id: document-merge-conflicts-are-not-repaired
+file: model/document/document.go
+find: if len(r.Conflicts) > 0 {\n\t\treturn nil, false, fields(r.Conflicts)\n\t}
+replace: if false {\n\t\treturn nil, false, fields(r.Conflicts)\n\t}
+pkg: ./model/document
+run: ^TestOneFieldChangedTwoWaysConflictsAtThatRecordNamingTheField$
+
+id: document-merge-conflicts-name-the-field
+file: model/document/document.go
+find: parts = append(parts, "field "+c.Path.String()+": "+c.Reason)
+replace: parts = append(parts, "field: "+c.Reason)
+pkg: ./model/document
+run: ^TestOneFieldChangedTwoWaysConflictsAtThatRecordNamingTheField$
+
+id: document-merge-is-by-field-only-for-records-changed-in-place
+file: model/document/document.go
+find: if reason == "" || ours.Kind != prolly.Modified || theirs.Kind != prolly.Modified {
+replace: if reason == "" {
+pkg: ./model/document
+run: ^TestOneFieldChangedTwoWaysConflictsAtThatRecordNamingTheField$

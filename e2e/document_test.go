@@ -156,6 +156,20 @@ func sameDocs(a, b map[string]merge.Node) bool {
 	return true
 }
 
+// E5: a collection written through a repository and committed reads back
+// from a fresh open of the same backend, record for record.
+func TestADocumentObjectRoundTripsThroughARepository(t *testing.T) {
+	bs := mem.New()
+	h := newDocHost(t, bs)
+	want := h.docs("u1", `{"name": "ada", "tags": ["math"], "age": 36}`, "u2", `{"name": "grace", "address": {"city": "Arlington"}}`, "\x00id", `[1, 2.5, null]`)
+	h.put(vcs.MainBranch, want)
+	h.commit(vcs.MainBranch, "users")
+	got := h.reopen().read(vcs.MainBranch)
+	if !sameDocs(got, want) {
+		t.Fatalf("after a fresh open the collection at %s has %d records differing from the %d committed", h.path, len(got), len(want))
+	}
+}
+
 // E5: two branches editing different fields of one record merge clean, and
 // the merged record holds both fields.
 func TestBranchesEditingDifferentFieldsOfOneRecordMerge(t *testing.T) {
