@@ -3,7 +3,7 @@ module github.com/SmithOperatingSolutions/snapshot-engine
 go 1.27
 
 require (
-	github.com/SmithOperatingSolutions/snapshot-core v0.1.0
+	github.com/SmithOperatingSolutions/snapshot-core v0.1.1
 	pgregory.net/rapid v1.3.0
 )
 
