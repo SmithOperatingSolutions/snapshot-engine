@@ -1,6 +1,13 @@
 package engine
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+
+	"github.com/SmithOperatingSolutions/snapshot-core/core/auth"
+	"github.com/SmithOperatingSolutions/snapshot-core/core/repo"
+	"github.com/SmithOperatingSolutions/snapshot-core/core/vcs"
+)
 
 // The errors callers see. Each is generic: it names what happened, never a
 // key, a value, a row or a file's contents (Engine Spec, security; the
@@ -31,3 +38,27 @@ var (
 
 // errNotImplemented is what a stub returns while E4 is built.
 var errNotImplemented = errors.New("engine: not implemented")
+
+// translate turns an error from the core into the engine error a caller
+// matches, keeping the core's for errors.Is. What reaches a caller is
+// scrubbed at the API's boundary.
+func translate(err error) error {
+	var to error
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, auth.ErrDenied):
+		to = ErrPermissionDenied
+	case errors.Is(err, auth.ErrInvalidPrincipal), errors.Is(err, vcs.ErrInvalidName):
+		to = ErrInvalid
+	case errors.Is(err, repo.ErrNoRepo), errors.Is(err, vcs.ErrNoRepo), errors.Is(err, vcs.ErrBranchNotFound), errors.Is(err, vcs.ErrTagNotFound):
+		to = ErrNotFound
+	case errors.Is(err, repo.ErrExists), errors.Is(err, vcs.ErrExists), errors.Is(err, vcs.ErrBranchExists), errors.Is(err, vcs.ErrTagExists):
+		to = ErrExists
+	case errors.Is(err, vcs.ErrMergeState), errors.Is(err, vcs.ErrUnresolvedConflicts):
+		to = ErrMergeInProgress
+	default:
+		return err
+	}
+	return fmt.Errorf("%w (%w)", to, err)
+}

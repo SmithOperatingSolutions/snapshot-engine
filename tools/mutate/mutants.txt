@@ -726,3 +726,25 @@ find: if !oursPresent || !theirsPresent {
 replace: if false {
 pkg: ./model/kv
 run: ^TestAHashMergesPerField$
+
+# engine
+id: engine-a-closed-database-serves-no-session
+file: engine/database.go
+find: if d.isClosed() {\n\t\treturn nil, ErrClosed\n\t}
+replace: if d.isClosed() && false {\n\t\treturn nil, ErrClosed\n\t}
+pkg: ./engine
+run: ^TestASessionIsRefusedWhereItCannotServe$
+
+id: engine-a-session-needs-its-branch-and-read-access
+file: engine/database.go
+find: if _, err := d.r.Head(ctx, p, branch); err != nil { // checks the principal, the branch and read access\n\t\treturn nil, translate(err)\n\t}
+replace: if _, err := d.r.Head(ctx, p, branch); err != nil && false { // checks the principal, the branch and read access\n\t\treturn nil, translate(err)\n\t}
+pkg: ./engine
+run: ^TestASessionIsRefusedWhereItCannotServe$
+
+id: engine-denied-is-permission-denied
+file: engine/errors.go
+find: case errors.Is(err, auth.ErrDenied):\n\t\tto = ErrPermissionDenied
+replace: case errors.Is(err, auth.ErrDenied):\n\t\tto = ErrInvalid
+pkg: ./engine
+run: ^TestASessionIsRefusedWhereItCannotServe$
