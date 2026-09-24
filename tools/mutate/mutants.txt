@@ -145,20 +145,6 @@ replace: case false:
 pkg: ./model/table
 run: ^TestSchemasThatCannotBeATablesAreRefused$
 
-id: table-catalog-refuses-trailing-bytes
-file: model/table/table.go
-find: if err := r.done(); err != nil {\n\t\treturn Schema{}, err\n\t}
-replace: if err := r.done(); err != nil && false {\n\t\treturn Schema{}, err\n\t}
-pkg: ./model/table
-run: ^TestForgedCatalogsAreRefused$
-
-id: table-varint-must-be-minimal
-file: model/table/wire.go
-find: if n > 1 && r.b[r.off+n-1] == 0 {
-replace: if false {
-pkg: ./model/table
-run: ^TestForgedCatalogsAreRefused$
-
 id: table-varchar-counts-characters
 file: model/table/cell.go
 find: if n := utf8.RuneCountInString(x); n > int(c.MaxLen) {

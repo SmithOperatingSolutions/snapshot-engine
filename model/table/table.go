@@ -12,6 +12,7 @@ import (
 
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/model"
+	"github.com/SmithOperatingSolutions/snapshot-core/core/wire"
 )
 
 // ID is the table model's id (the Storage Core Spec's registry table).
@@ -187,80 +188,104 @@ func EncodeCatalog(s Schema) ([]byte, error) {
 	if err := s.Validate(); err != nil {
 		return nil, err
 	}
-	var w writer
-	w.raw([]byte(catalogMagic))
-	w.u16(Format)
-	w.uvarint(uint64(len(s.Columns)))
+	var w wire.Writer
+	w.Raw([]byte(catalogMagic))
+	w.U16(Format)
+	w.Uvarint(uint64(len(s.Columns)))
 	for _, c := range s.Columns {
-		w.u16(uint16(c.Tag))
-		w.bytes([]byte(c.Name))
-		w.u8(uint8(c.Type))
+		w.U16(uint16(c.Tag))
+		w.LenBytes([]byte(c.Name))
+		w.U8(uint8(c.Type))
 		if c.Nullable {
-			w.u8(1)
+			w.U8(1)
 		} else {
-			w.u8(0)
+			w.U8(0)
 		}
-		w.u32(c.MaxLen)
+		w.U32(c.MaxLen)
 	}
-	w.uvarint(uint64(len(s.PrimaryKey)))
+	w.Uvarint(uint64(len(s.PrimaryKey)))
 	for _, t := range s.PrimaryKey {
-		w.u16(uint16(t))
+		w.U16(uint16(t))
 	}
-	w.uvarint(uint64(len(s.Indexes)))
+	w.Uvarint(uint64(len(s.Indexes)))
 	for _, ix := range s.Indexes {
-		w.u16(uint16(ix.Tag))
-		w.uvarint(uint64(len(ix.Columns)))
+		w.U16(uint16(ix.Tag))
+		w.Uvarint(uint64(len(ix.Columns)))
 		for _, t := range ix.Columns {
-			w.u16(uint16(t))
+			w.U16(uint16(t))
 		}
 	}
-	return w.b, nil
+	return w.Bytes(), nil
 }
 
 // DecodeCatalog parses a record (chunk.ErrCorrupt for anything else) into a
 // schema that validates.
 func DecodeCatalog(b []byte) (Schema, error) {
-	r := &reader{b: b}
-	if magic := r.take(len(catalogMagic)); r.err == nil && string(magic) != catalogMagic {
-		r.fail("not a catalog record")
+	r := wire.NewReader(b)
+	if magic := r.Fixed(len(catalogMagic)); r.Err() == nil && string(magic) != catalogMagic {
+		return Schema{}, corrupt("not a catalog record")
 	}
-	if v := r.u16(); r.err == nil && v != Format {
-		r.fail("catalog format %d, this package reads %d", v, Format)
+	if v := r.U16(); r.Err() == nil && v != Format {
+		return Schema{}, corrupt("catalog format %d, this package reads %d", v, Format)
 	}
 	var s Schema
-	n := r.uvarint(MaxColumns)
-	for i := uint64(0); i < n && r.err == nil; i++ {
-		c := Column{Tag: Tag(r.u16())}
-		c.Name = string(r.bytes(MaxNameLen))
-		c.Type = Type(r.u8())
-		switch nullable := r.u8(); nullable {
-		case 0:
-		case 1:
+	n, err := bounded(r, MaxColumns)
+	if err != nil {
+		return Schema{}, err
+	}
+	for i := uint64(0); i < n && r.Err() == nil; i++ {
+		c := Column{Tag: Tag(r.U16())}
+		c.Name = string(r.LenBytes(MaxNameLen))
+		c.Type = Type(r.U8())
+		switch nullable := r.U8(); {
+		case r.Err() != nil:
+		case nullable == 1:
 			c.Nullable = true
-		default:
-			r.fail("nullable byte %d", nullable)
+		case nullable != 0:
+			return Schema{}, corrupt("nullable byte %d", nullable)
 		}
-		c.MaxLen = r.u32()
+		c.MaxLen = r.U32()
 		s.Columns = append(s.Columns, c)
 	}
-	n = r.uvarint(MaxColumns)
-	for i := uint64(0); i < n && r.err == nil; i++ {
-		s.PrimaryKey = append(s.PrimaryKey, Tag(r.u16()))
+	if n, err = bounded(r, MaxColumns); err != nil {
+		return Schema{}, err
 	}
-	n = r.uvarint(MaxIndexes)
-	for i := uint64(0); i < n && r.err == nil; i++ {
-		ix := Index{Tag: Tag(r.u16())}
-		m := r.uvarint(MaxColumns)
-		for j := uint64(0); j < m && r.err == nil; j++ {
-			ix.Columns = append(ix.Columns, Tag(r.u16()))
+	for i := uint64(0); i < n && r.Err() == nil; i++ {
+		s.PrimaryKey = append(s.PrimaryKey, Tag(r.U16()))
+	}
+	if n, err = bounded(r, MaxIndexes); err != nil {
+		return Schema{}, err
+	}
+	for i := uint64(0); i < n && r.Err() == nil; i++ {
+		ix := Index{Tag: Tag(r.U16())}
+		m, err := bounded(r, MaxColumns)
+		if err != nil {
+			return Schema{}, err
+		}
+		for j := uint64(0); j < m && r.Err() == nil; j++ {
+			ix.Columns = append(ix.Columns, Tag(r.U16()))
 		}
 		s.Indexes = append(s.Indexes, ix)
 	}
-	if err := r.done(); err != nil {
-		return Schema{}, err
+	if err := r.Done(); err != nil {
+		return Schema{}, fmt.Errorf("%w: %w", chunk.ErrCorrupt, err)
 	}
 	if err := s.Validate(); err != nil {
 		return Schema{}, fmt.Errorf("%w: %w", chunk.ErrCorrupt, err)
 	}
 	return s, nil
+}
+
+// corrupt is a record that is not one of ours.
+func corrupt(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", chunk.ErrCorrupt, fmt.Sprintf(format, args...))
+}
+
+// bounded reads a count no larger than limit.
+func bounded(r *wire.Reader, limit uint64) (uint64, error) {
+	n := r.Uvarint()
+	if r.Err() == nil && n > limit {
+		return 0, corrupt("a count of %d, over the limit %d", n, limit)
+	}
+	return n, nil
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/SmithOperatingSolutions/snapshot-core/core/hash"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/model"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/prolly"
+	"github.com/SmithOperatingSolutions/snapshot-core/core/wire"
 )
 
 // Row is a row's cells by column tag; a column left out is NULL.
@@ -678,46 +679,49 @@ type indexRoot struct {
 // (uvarint length, bytes) · primary root [32] · row count u64 · index
 // count uvarint · per index (tag u16 · root [32] · count u64).
 func encodeRoot(r rootRecord) []byte {
-	var w writer
-	w.raw([]byte(rootMagic))
-	w.u16(Format)
-	w.bytes(r.catalog)
-	w.raw(r.primary.root[:])
-	w.u64(r.primary.count)
-	w.uvarint(uint64(len(r.indexes)))
+	var w wire.Writer
+	w.Raw([]byte(rootMagic))
+	w.U16(Format)
+	w.LenBytes(r.catalog)
+	w.Raw(r.primary.root[:])
+	w.U64(r.primary.count)
+	w.Uvarint(uint64(len(r.indexes)))
 	for _, ix := range r.indexes {
-		w.u16(uint16(ix.tag))
-		w.raw(ix.root[:])
-		w.u64(ix.count)
+		w.U16(uint16(ix.tag))
+		w.Raw(ix.root[:])
+		w.U64(ix.count)
 	}
-	return w.b
+	return w.Bytes()
 }
 
 // decodeRoot parses a record (chunk.ErrCorrupt for anything else): the
 // catalog must decode, and the indexes must be the catalog's, in order,
 // each as full as the primary map.
 func decodeRoot(b []byte) (rootRecord, error) {
-	r := &reader{b: b}
-	if magic := r.take(len(rootMagic)); r.err == nil && string(magic) != rootMagic {
-		r.fail("not a table root record")
+	r := wire.NewReader(b)
+	if magic := r.Fixed(len(rootMagic)); r.Err() == nil && string(magic) != rootMagic {
+		return rootRecord{}, corrupt("not a table root record")
 	}
-	if v := r.u16(); r.err == nil && v != Format {
-		r.fail("table format %d, this package reads %d", v, Format)
+	if v := r.U16(); r.Err() == nil && v != Format {
+		return rootRecord{}, corrupt("table format %d, this package reads %d", v, Format)
 	}
 	var rec rootRecord
-	rec.catalog = r.bytes(MaxCatalogLen)
-	copy(rec.primary.root[:], r.take(32))
-	rec.primary.count = r.u64()
-	n := r.uvarint(MaxIndexes)
-	for i := uint64(0); i < n && r.err == nil; i++ {
+	rec.catalog = bytes.Clone(r.LenBytes(MaxCatalogLen))
+	copy(rec.primary.root[:], r.Fixed(32))
+	rec.primary.count = r.U64()
+	n, err := bounded(r, MaxIndexes)
+	if err != nil {
+		return rootRecord{}, err
+	}
+	for i := uint64(0); i < n && r.Err() == nil; i++ {
 		var ix indexRoot
-		ix.tag = Tag(r.u16())
-		copy(ix.root[:], r.take(32))
-		ix.count = r.u64()
+		ix.tag = Tag(r.U16())
+		copy(ix.root[:], r.Fixed(32))
+		ix.count = r.U64()
 		rec.indexes = append(rec.indexes, ix)
 	}
-	if err := r.done(); err != nil {
-		return rootRecord{}, err
+	if err := r.Done(); err != nil {
+		return rootRecord{}, fmt.Errorf("%w: %w", chunk.ErrCorrupt, err)
 	}
 	schema, err := DecodeCatalog(rec.catalog)
 	if err != nil {
