@@ -1,0 +1,65 @@
+# snapshot-engine CI. Every job here is also reachable locally through mise
+# (mise.toml), so a red in CI reproduces on a laptop with Go alone.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: "0"
+  GOLANGCI_LINT_VERSION: v2.13.2
+  GOVULNCHECK_VERSION: v1.8.0
+
+jobs:
+  static:
+    name: fmt · vet · mod verify · lint · vuln
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod, cache: true }
+      - run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      - run: go mod verify
+      - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}
+      - run: golangci-lint run ./...
+      - run: go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}
+      - run: govulncheck ./...
+
+  test:
+    name: Race suite / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod, cache: true }
+      - run: CGO_ENABLED=1 go test -race -count=1 ./...
+
+  redcheck:
+    # Every `test:` commit in the PR must fail, on an assertion, without the
+    # commit that implements it (CONTRIBUTING.md): the storage core's tool,
+    # run through go.mod's tool directive.
+    name: red-check
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod, cache: true }
+      - run: go tool redcheck -base origin/${{ github.base_ref }}

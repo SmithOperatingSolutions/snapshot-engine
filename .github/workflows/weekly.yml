@@ -1,0 +1,48 @@
+# The slow tiers, once a week (Sunday morning UTC) and on demand: every
+# checked-in mutant re-run to prove the guards still have teeth, and every
+# fuzz target for ten minutes. Weekly, not nightly, as in the storage core.
+name: Weekly
+
+on:
+  schedule:
+    - cron: "17 7 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  mutate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod, cache: true }
+      - run: go tool mutate
+
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod, cache: true }
+      - name: every fuzz target, ten minutes each
+        run: |
+          set -e
+          for pkg in $(go list ./...); do
+            for t in $(go test -list '^Fuzz' "$pkg" | grep '^Fuzz' || true); do
+              echo "--- fuzz $pkg $t"
+              go test -run '^$' -fuzz "^$t\$" -fuzztime 10m "$pkg"
+            done
+          done
+      - if: failure() # a finding's input, to minimize and check in (CONTRIBUTING)
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings
+          path: '**/testdata/fuzz/**'
+          if-no-files-found: ignore

@@ -1,0 +1,9 @@
+# Mutants: every entry is a change to production code that a named test must
+# catch (docs/TESTING.md §5, CONTRIBUTING.md). Run with `mise run mutate`.
+# Format, one stanza per mutant, blank line between:
+#   id: <kebab-case-id>
+#   file: <path>
+#   find: <text occurring exactly once; \n and \t escapes>
+#   replace: <text>
+#   pkg: ./<package>
+#   run: ^TestName$
