@@ -1287,3 +1287,25 @@ find: if math.IsNaN(float64(f)) {\n\t\treturn math.MaxUint32\n\t}
 replace: if math.IsNaN(float64(f)) && false {\n\t\treturn math.MaxUint32\n\t}
 pkg: ./model/table
 run: ^TestNaNSortsAboveEveryNumber$
+
+# engine checkout
+id: engine-checkout-frees-the-branch-left
+file: engine/session.go
+find: s.co.Close() // the branch left behind is free once no session holds it
+replace: _ = s.co // the branch left behind is free once no session holds it
+pkg: ./engine
+run: ^TestABranchASessionIsOnCannotBeDeleted$
+
+id: engine-close-frees-the-branch
+file: engine/session.go
+find: s.closed = true\n\t\ts.co.Close()
+replace: s.closed = true
+pkg: ./engine
+run: ^TestABranchASessionIsOnCannotBeDeleted$
+
+id: engine-in-use-is-its-own-error
+file: engine/errors.go
+find: case errors.Is(err, vcs.ErrBranchInUse):\n\t\tto = ErrInUse
+replace: case errors.Is(err, vcs.ErrBranchInUse):\n\t\tto = ErrInvalid
+pkg: ./engine
+run: ^TestABranchASessionIsOnCannotBeDeleted$

@@ -32,6 +32,7 @@ type Session struct {
 	db     *Database
 	p      Principal
 	branch string
+	co     *vcs.Session // the core's hold on the branch: no other session can delete it
 	closed bool
 }
 
@@ -84,10 +85,12 @@ func (s *Session) Checkout(ctx context.Context, branch string) error {
 	if err := s.ready(); err != nil {
 		return err
 	}
-	if _, err := s.db.r.Head(ctx, s.p, branch); err != nil {
+	co, err := s.db.r.Checkout(ctx, s.p, branch)
+	if err != nil {
 		return translate(err)
 	}
-	s.branch = branch
+	s.co.Close() // the branch left behind is free once no session holds it
+	s.branch, s.co = branch, co
 	return nil
 }
 
@@ -423,7 +426,10 @@ func (s *Session) Begin(ctx context.Context) (*Txn, error) {
 // Close ends the session; every call after it is ErrClosed. Closing twice
 // is not an error.
 func (s *Session) Close() error {
-	s.closed = true
+	if !s.closed {
+		s.closed = true
+		s.co.Close()
+	}
 	return nil
 }
 

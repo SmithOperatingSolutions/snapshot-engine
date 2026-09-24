@@ -128,8 +128,9 @@ func (d *Database) Session(ctx context.Context, p Principal, branch string) (*Se
 	if d.isClosed() {
 		return nil, ErrClosed
 	}
-	if _, err := d.r.Head(ctx, p, branch); err != nil { // checks the principal, the branch and read access
+	co, err := d.r.Checkout(ctx, p, branch) // checks the principal, the branch and read access, and holds the branch
+	if err != nil {
 		return nil, translate(err)
 	}
-	return &Session{db: d, p: p, branch: branch}, nil
+	return &Session{db: d, p: p, branch: branch, co: co}, nil
 }
