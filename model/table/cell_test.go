@@ -2,6 +2,7 @@ package table_test
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"math"
 	"math/big"
@@ -183,31 +184,18 @@ func typeCases() []typeCase {
 			}
 			return sign(x - y)
 		}},
-		{col(table.TypeInt2, false), func(t *rapid.T) any { return rapid.Int16().Draw(t, "v") }, func(a, b any) int { return sign(int(a.(int16)) - int(b.(int16))) }},
-		{col(table.TypeInt4, false), func(t *rapid.T) any { return rapid.Int32().Draw(t, "v") }, func(a, b any) int { return sign(int(a.(int32) - b.(int32))) }},
-		{col(table.TypeInt8, false), func(t *rapid.T) any { return rapid.Int64().Draw(t, "v") }, func(a, b any) int {
-			x, y := a.(int64), b.(int64)
-			if x < y {
-				return -1
-			}
-			if x > y {
-				return 1
-			}
-			return 0
-		}},
+		{col(table.TypeInt2, false), func(t *rapid.T) any { return rapid.Int16().Draw(t, "v") }, func(a, b any) int { return cmp.Compare(a.(int16), b.(int16)) }},
+		{col(table.TypeInt4, false), func(t *rapid.T) any { return rapid.Int32().Draw(t, "v") }, func(a, b any) int { return cmp.Compare(a.(int32), b.(int32)) }},
+		{col(table.TypeInt8, false), func(t *rapid.T) any { return rapid.Int64().Draw(t, "v") }, func(a, b any) int { return cmp.Compare(a.(int64), b.(int64)) }},
 		{col(table.TypeFloat4, false), func(t *rapid.T) any { return float32(specials64(t).(float64)) }, func(a, b any) int { return floatCmp(float64(a.(float32)), float64(b.(float32))) }},
 		{col(table.TypeFloat8, false), specials64, func(a, b any) int { return floatCmp(a.(float64), b.(float64)) }},
 		{col(table.TypeNumeric, false), genNumeric, numericCmp},
 		{col(table.TypeText, false), func(t *rapid.T) any { return rapid.String().Draw(t, "v") }, str},
 		{col(table.TypeVarchar, false), func(t *rapid.T) any { return rapid.StringN(0, 255, -1).Draw(t, "v") }, str},
 		{col(table.TypeBytea, false), func(t *rapid.T) any { return rapid.SliceOf(rapid.Byte()).Draw(t, "v") }, func(a, b any) int { return bytes.Compare(a.([]byte), b.([]byte)) }},
-		{col(table.TypeDate, false), func(t *rapid.T) any { return table.Date(rapid.Int32().Draw(t, "v")) }, func(a, b any) int { return sign(int(a.(table.Date) - b.(table.Date))) }},
-		{col(table.TypeTimestamp, false), func(t *rapid.T) any { return table.Timestamp(rapid.Int64().Draw(t, "v")) }, func(a, b any) int {
-			return sign(int(min(max(a.(table.Timestamp)-b.(table.Timestamp), -1), 1)))
-		}},
-		{col(table.TypeTimestampTZ, false), func(t *rapid.T) any { return table.TimestampTZ(rapid.Int64().Draw(t, "v")) }, func(a, b any) int {
-			return sign(int(min(max(a.(table.TimestampTZ)-b.(table.TimestampTZ), -1), 1)))
-		}},
+		{col(table.TypeDate, false), func(t *rapid.T) any { return table.Date(rapid.Int32().Draw(t, "v")) }, func(a, b any) int { return cmp.Compare(a.(table.Date), b.(table.Date)) }},
+		{col(table.TypeTimestamp, false), func(t *rapid.T) any { return table.Timestamp(rapid.Int64().Draw(t, "v")) }, func(a, b any) int { return cmp.Compare(a.(table.Timestamp), b.(table.Timestamp)) }},
+		{col(table.TypeTimestampTZ, false), func(t *rapid.T) any { return table.TimestampTZ(rapid.Int64().Draw(t, "v")) }, func(a, b any) int { return cmp.Compare(a.(table.TimestampTZ), b.(table.TimestampTZ)) }},
 		{col(table.TypeUUID, false), func(t *rapid.T) any {
 			var u table.UUID
 			copy(u[:], rapid.SliceOfN(rapid.Byte(), 16, 16).Draw(t, "v"))
