@@ -610,3 +610,24 @@ func TestHandleReadsStopAndRefuse(t *testing.T) {
 		t.Errorf("an update that changes the key = %v, want ErrInvalid", err)
 	}
 }
+
+// Asking a transaction for a table it already opened gives the same
+// handle: a write through the first is seen through the second, and lands.
+func TestATableOpenedTwiceIsOneHandle(t *testing.T) {
+	_, s, _ := txnDB(t)
+	x := txnBegin(t, s)
+	first := txnTable(t, x, "people")
+	if _, err := first.Insert(ctx, txnPerson(3, "cy", 50)); err != nil {
+		t.Fatal(err)
+	}
+	second := txnTable(t, x, "people")
+	if _, ok, err := second.Get(ctx, engine.Key{int64(3)}); err != nil || !ok {
+		t.Errorf("a row written through the first handle is not seen through the second (%v, %v)", ok, err)
+	}
+	if err := x.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := txnName(t, s, 3); got != "cy" {
+		t.Errorf("row 3 is %q after commit, want cy", got)
+	}
+}

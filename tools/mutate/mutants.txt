@@ -1048,3 +1048,10 @@ find: \tif err := h.flush(ctx); err != nil {\n\t\treturn err\n\t}\n\trows, err :
 replace: \tif err := error(nil); err != nil {\n\t\treturn err\n\t}\n\trows, err := h.t.IndexLookup(ctx, index, values...)
 pkg: ./engine
 run: ^TestATransactionReadsItsSnapshotAndItsOwnWrites$
+
+id: engine-txn-an-open-table-is-one-handle
+file: engine/txn.go
+find: \t\tif o.dropped {\n\t\t\treturn nil, ErrNotFound\n\t\t}\n\t\treturn o.table, nil
+replace: \t\tif o.dropped {\n\t\t\treturn nil, ErrNotFound\n\t\t}\n\t\t_ = o.table
+pkg: ./engine
+run: ^TestATableOpenedTwiceIsOneHandle$
