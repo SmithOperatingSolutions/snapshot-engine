@@ -61,6 +61,12 @@ func TestTreesMergeByPath(t *testing.T) {
 			merge.Obj(f("l", merge.Arr(merge.Str("a"), merge.Str("b"), merge.Str("d")))),
 			merge.Obj(f("l", merge.Arr(merge.Str("a"), merge.Str("b"), merge.Str("c"), merge.Str("d")))), "", "l/2", merge.TreeOptions{}},
 		"a scalar root, two changes": {merge.Num("1"), merge.Num("2"), merge.Num("3"), merge.Num("1"), "", "", merge.TreeOptions{}},
+		"a counter that is not an integer": {
+			merge.Obj(f("n", merge.Num("5"))), merge.Obj(f("n", merge.Num("7.5"))), merge.Obj(f("n", merge.Num("6"))),
+			merge.Obj(f("n", merge.Num("5"))), "n", "", counter},
+		"a counter added on both sides, as booleans": {
+			merge.Obj(), merge.Obj(f("n", merge.Boolean(true))), merge.Obj(f("n", merge.Boolean(false))),
+			merge.Obj(), "n", "", counter},
 	} {
 		got := merge.Tree(c.base, c.ours, c.theirs, c.opts)
 		if name == "a scalar root, two changes" {
@@ -97,6 +103,9 @@ func TestTreeProperties(t *testing.T) {
 		case kind == 0 || depth == 0:
 			return merge.Num(rapid.SampledFrom([]string{"1", "2", "3"}).Draw(rt, name+".num"))
 		case kind == 1:
+			if rapid.Bool().Draw(rt, name+".isbool") {
+				return merge.Boolean(rapid.Bool().Draw(rt, name+".bool"))
+			}
 			return merge.Str(rapid.SampledFrom([]string{"x", "y"}).Draw(rt, name+".str"))
 		case kind == 2:
 			var fs []merge.Field

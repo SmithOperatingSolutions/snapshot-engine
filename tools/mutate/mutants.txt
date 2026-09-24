@@ -79,3 +79,10 @@ find: case b != nil && o.Kind == Array && t.Kind == Array && b.Kind == Array:
 replace: case false:
 pkg: ./merge
 run: ^TestTreesMergeByPath$
+
+id: merge-tree-counter-refuses-a-non-integer
+file: merge/tree.go
+find: if err1 != nil || err2 != nil {
+replace: if err1 != nil && err2 != nil {
+pkg: ./merge
+run: ^TestTreesMergeByPath$
