@@ -10,6 +10,7 @@ import (
 	"github.com/SmithOperatingSolutions/snapshot-core/core/hash"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/model"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/prolly"
+	"github.com/SmithOperatingSolutions/snapshot-engine/merge"
 )
 
 // Model is the table model; Config is how it writes the tables it merges.
@@ -211,19 +212,29 @@ func (m Model) Diff(ctx context.Context, from, to model.Root, r chunk.Reader) (m
 	return &diffIter{t: tt, d: d}, nil
 }
 
-// mergeCell is the three-way rule for one cell: unchanged on either side
-// takes the other; the same change on both is that change; different
-// changes conflict. The merge library replaces this when it lands.
-func mergeCell(base, ours, theirs any) (merged any, conflict bool) {
-	switch {
-	case sameCell(ours, theirs):
-		return ours, false
-	case sameCell(ours, base):
-		return theirs, false
-	case sameCell(theirs, base):
-		return ours, false
+// mergeCell is the three-way rule for one cell, the merge library's Scalar
+// over the cell's encoding under its column: the side that changed wins over
+// one that did not, the same change on both is that change, and two
+// different changes are a conflict. A value that does not encode under the
+// column's type is an error, never a silent choice; NULL is a value here.
+func mergeCell(c Column, base, ours, theirs any) (merged any, conflict bool, err error) {
+	c.Nullable = true // a row added on one side has no base cell: NULL, compared as such
+	var enc [3]string
+	for i, v := range []any{base, ours, theirs} {
+		b, err := encodeCell(nil, c, v)
+		if err != nil {
+			return nil, false, err
+		}
+		enc[i] = string(b)
 	}
-	return nil, true
+	r := merge.Scalar(enc[0], enc[1], enc[2])
+	switch {
+	case !r.Clean():
+		return nil, true, nil
+	case r.Value == enc[1]:
+		return ours, false, nil
+	}
+	return theirs, false, nil
 }
 
 // Merge implements model.Model for tables of one schema: rows merge
@@ -331,7 +342,10 @@ func (e *Editor) reconcile(ts [3]*Table, co, ct prolly.Change) ([]model.Conflict
 			merged[col.Tag] = ours[col.Tag]
 			continue
 		}
-		v, conflict := mergeCell(base[col.Tag], ours[col.Tag], theirs[col.Tag])
+		v, conflict, err := mergeCell(col, base[col.Tag], ours[col.Tag], theirs[col.Tag])
+		if err != nil {
+			return nil, err
+		}
 		if conflict {
 			reason := "changed differently on both sides"
 			if co.Kind == prolly.Added {
