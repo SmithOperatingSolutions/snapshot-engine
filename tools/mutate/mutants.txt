@@ -452,3 +452,66 @@ find: case c < 0x20:\n\t\t\tb = append(b,
 replace: case false:\n\t\t\tb = append(b, 
 pkg: ./model/document
 run: ^TestEncodeIsTheOneText$
+
+id: document-record-checks-the-format-byte
+file: model/document/record.go
+find: if b[0] != Format {
+replace: if b[0] != Format && false {
+pkg: ./model/document
+run: ^TestAFrameThatIsNotARecordIsRefused$
+
+id: document-record-must-be-canonical
+file: model/document/record.go
+find: if !bytes.Equal(Encode(n), b[1:]) {
+replace: if !bytes.Equal(Encode(n), b[1:]) && false {
+pkg: ./model/document
+run: ^TestAFrameThatIsNotARecordIsRefused$
+
+id: document-a-number-node-must-be-canonical
+file: model/document/record.go
+find: if err != nil || got.Kind != merge.Number || got.Number != n.Number {
+replace: if err != nil || got.Kind != merge.Number {
+pkg: ./model/document
+run: ^TestAFrameThatIsNotARecordIsRefused$
+
+id: document-fields-must-be-sorted-and-unique
+file: model/document/record.go
+find: if i > 0 && n.Fields[i-1].Name >= f.Name {
+replace: if i > 0 && n.Fields[i-1].Name > f.Name {
+pkg: ./model/document
+run: ^TestAFrameThatIsNotARecordIsRefused$
+
+id: document-a-node-is-bounded-in-depth
+file: model/document/record.go
+find: case merge.Array:\n\t\tif depth+1 > MaxDepth {
+replace: case merge.Array:\n\t\tif false {
+pkg: ./model/document
+run: ^TestAFrameThatIsNotARecordIsRefused$
+
+id: document-a-record-text-is-bounded
+file: model/document/record.go
+find: if len(text) > MaxDocument {
+replace: if len(text) > MaxDocument*2 {
+pkg: ./model/document
+run: ^TestAFrameThatIsNotARecordIsRefused$
+
+id: document-an-id-is-1-to-4096-bytes
+file: model/document/document.go
+find: if len(id) == 0 || len(id) > MaxIDSize {
+replace: if len(id) > MaxIDSize*2 {
+pkg: ./model/document
+run: ^TestWriteRefusesABadIDOrRecord$
+
+id: document-a-stored-id-is-checked
+file: model/document/document.go
+find: if err := checkID(id); err != nil {\n\t\treturn merge.Node{}, fmt.Errorf("%w: a stored id: %w", chunk.ErrCorrupt, err)\n\t}\n\treturn DecodeRecord(frame)
+replace: return DecodeRecord(frame)
+pkg: ./model/document
+run: ^TestValidateRefusesWhatIsNotAnObject$
+
+id: document-write-refuses-a-bad-record
+file: model/document/document.go
+find: return model.Root{}, fmt.Errorf("record %q: %w", id, err)
+replace: continue
+pkg: ./model/document
+run: ^TestWriteRefusesABadIDOrRecord$

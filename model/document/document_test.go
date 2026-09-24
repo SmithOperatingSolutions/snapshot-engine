@@ -150,6 +150,25 @@ func TestValidateRefusesWhatIsNotAnObject(t *testing.T) {
 	if _, err := document.Read(ctx, s, cfg(), forged); !errors.Is(err, chunk.ErrCorrupt) {
 		t.Errorf("Read of a map holding a value that is not a record: %v", err)
 	}
+	// A map of the right shape holding a good record under an empty id.
+	good, err := document.EncodeRecord(doc(t, `{"ok": true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pm, err = prolly.Empty(ctx, s, cfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e = pm.Editor()
+	if err := e.Put([]byte{}, good); err != nil {
+		t.Fatalf("fixture: the map refuses an empty key itself: %v", err)
+	}
+	if pm, err = e.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Validate(ctx, model.Root{Hash: pm.Root(), Size: 1, Format: document.Format}, s); !errors.Is(err, chunk.ErrCorrupt) {
+		t.Errorf("a map holding a record under an empty id validated: %v", err)
+	}
 }
 
 // Walk names the object's root and every chunk of its map, all of which the

@@ -9,6 +9,7 @@ import (
 	"github.com/SmithOperatingSolutions/snapshot-core/core/hash"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/model"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/prolly"
+	"github.com/SmithOperatingSolutions/snapshot-core/model/mapobject"
 
 	"github.com/SmithOperatingSolutions/snapshot-engine/merge"
 )
@@ -42,24 +43,100 @@ func (Model) ID() model.ID { return ID }
 // FormatVersion implements model.Model.
 func (Model) FormatVersion() uint16 { return Format }
 
-// Write stores records, by id, as an object. (Stub.)
+// spec is the collection as a map-shaped model: a map from record id to
+// record frame under a configuration, its records checked as ids of ours
+// holding frames of ours.
+func spec(c prolly.Config) mapobject.Spec {
+	return mapobject.Spec{Name: "document", Format: Format, Config: c, Check: func(id, frame []byte) error {
+		_, err := checked(id, frame)
+		return err
+	}}
+}
+
+// checkID refuses an empty id and one over MaxIDSize.
+func checkID(id []byte) error {
+	if len(id) == 0 || len(id) > MaxIDSize {
+		return fmt.Errorf("%w: %d bytes", ErrID, len(id))
+	}
+	return nil
+}
+
+// checked decodes a stored record and its id.
+func checked(id, frame []byte) (merge.Node, error) {
+	if err := checkID(id); err != nil {
+		return merge.Node{}, fmt.Errorf("%w: a stored id: %w", chunk.ErrCorrupt, err)
+	}
+	return DecodeRecord(frame)
+}
+
+// Write stores records, by id, as an object.
 func Write(ctx context.Context, s chunk.ReadWriter, c prolly.Config, records map[string]merge.Node) (model.Root, error) {
-	return model.Root{}, errNotImplemented
+	frames := make(map[string][]byte, len(records))
+	for id, n := range records { // every record checked before anything is stored
+		if err := checkID([]byte(id)); err != nil {
+			return model.Root{}, err
+		}
+		f, err := EncodeRecord(n)
+		if err != nil {
+			return model.Root{}, fmt.Errorf("record %q: %w", id, err)
+		}
+		frames[id] = f
+	}
+	m, err := prolly.Empty(ctx, s, c)
+	if err != nil {
+		return model.Root{}, err
+	}
+	e := m.Editor()
+	for id, f := range frames {
+		if err := e.Put([]byte(id), f); err != nil {
+			return model.Root{}, err
+		}
+	}
+	if m, err = e.Flush(ctx); err != nil {
+		return model.Root{}, err
+	}
+	return spec(c).Root(m), nil
 }
 
-// Read returns an object's records by id. (Stub.)
+// Read returns an object's records by id.
 func Read(ctx context.Context, r chunk.Reader, c prolly.Config, root model.Root) (map[string]merge.Node, error) {
-	return nil, errNotImplemented
+	m, err := spec(c).Open(ctx, mapobject.ReadOnly(r), root)
+	if err != nil {
+		return nil, err
+	}
+	it, err := m.IterRange(ctx, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]merge.Node, m.Count())
+	for {
+		id, f, ok, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return out, nil
+		}
+		n, err := checked(id, f)
+		if err != nil {
+			return nil, err
+		}
+		out[string(id)] = n
+	}
 }
 
-// Validate implements model.Model. (Stub.)
+// Validate implements model.Model: the map opens under the root's claims
+// and every entry is an id of ours holding a record of ours.
 func (m Model) Validate(ctx context.Context, root model.Root, r chunk.Reader) error {
-	return errNotImplemented
+	return spec(m.Config).Validate(ctx, root, r)
 }
 
-// Walk implements model.Walker. (Stub.)
+// Walk implements model.Walker: the object is its map, every record inline.
 func (m Model) Walk(ctx context.Context, root model.Root, r chunk.Reader, visit func(h hash.Hash, leaf bool) (bool, error)) error {
-	return errNotImplemented
+	return spec(m.Config).Walk(ctx, root, r, visit, func(id, frame []byte) error {
+		_, err := checked(id, frame)
+		return err
+	})
 }
 
 // Diff implements model.Model. (Stub.)
