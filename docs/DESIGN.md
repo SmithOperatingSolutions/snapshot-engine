@@ -110,7 +110,31 @@ rows merge per row then per cell, a cell a `merge.Scalar` over its
 encoding, a row added on one side read under a nullable copy of the
 column. With any conflict the result is ours, untouched.
 
-Still to land: the document record (E5).
+**document, format 1** (`model/document`, id 4). An object is a prolly map
+through `mapobject.Spec{Name: "document", Format: 1}` from a record id (1 to
+4096 bytes) to a *record frame*: `format u8` (1) then the record's canonical
+JSON text. The decoder refuses an empty frame, another format, text that is
+not a document, text that is not the canonical spelling (equal values are
+equal bytes), and bytes after the text. `model.Root{Size: records, Depth: 0,
+Format: 1}`.
+
+*Canonical text*: strict JSON, no whitespace, object fields sorted by name
+and unique, numbers in one decimal spelling (no exponent, no leading or
+trailing zeros, zero as `0`, `-0` as `0`), strings escaped as `\" \\ \b
+\f \n \r \t`, other control characters as `\u00XX`, everything else raw
+UTF-8. The model owns it: `merge.Node.Canonical()` is Go-quoted, not JSON.
+
+*The parser*: RFC 8259 only (no leading zeros, `.5`, `1.`, `+1`, hex, NaN,
+comments, single quotes or trailing commas); at most 1 MiB of text, 64
+nesting levels, 1000 digits either side of a number's point, a 6-digit
+exponent; surrogate pairs as one rune, lone surrogates refused, a field
+twice in one object refused.
+
+*Merge*: per record through the helper; a record both sides changed merges
+by field path through `merge.Tree`. *Location*: the record id; a record's
+field conflicts are named in the reason as `field <path>: <why>; ...` with
+`merge.Path` paths (`address/city`), until the helper's resolver can
+locate a conflict below the key.
 
 ## 4. Testing tiers
 

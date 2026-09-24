@@ -24,7 +24,7 @@ The engine takes the core by tag (`go.mod`) and never tracks its items here.
 | **E2 Tables** | ✅ Done | `model/table`: catalog with tagged columns, order-preserving cell encoding for every v1 type, primary and index maps, a hidden row id, the row API, `WithSchema`; diff per row then cell; merge of schemas by column tag then of rows under the merged schema, cells through the merge library; three decoders, three fuzz targets; 37 mutants, 90% covered | Every E2 item below green ✅ |
 | **E3 Key-value** | | `model/kv` whole: bytes, counter, set, hash, sorted set, sequence, each with its policy | Every E3 item below green |
 | **E4 Engine API** | | `engine/`: `Database`, `Session`, `Txn`; snapshot isolation; optimistic commit through the models' merge; authorization on every call; commit, branch, merge, diff, log | Every E4 item below green; `e2e/` drives a repository through `engine/` alone |
-| **E5 Documents** | | `model/document`: records by id, field-path diff and merge, a bounded parser for JSON input | Every E5 item below green |
+| **E5 Documents** | ✅ Done (on `core-next`, which waits for the core's next tag) | `model/document`: records by id as canonical JSON behind a versioned frame, the model's own bounded JSON parser, diff per record, merge by field path through the merge library on the core's `model/mapobject`; 21 mutants, 92% covered | Every E5 item below green ✅ |
 
 Adapters (RESP, Mongo, MySQL, pgwire, filesystems) are separate repositories
 with their own progress; they import `engine/` alone.
@@ -84,10 +84,10 @@ with their own progress; they import `engine/` alone.
 - [ ] `e2e/`: a repository created, written, branched, merged and read back through `engine/` alone, with the models registered by the caller.
 
 ### E5 Documents (`model/document`)
-- [ ] A record's fields diff by path; two writers on different fields of one record both land.
-- [ ] A field deleted on one side and changed on the other is a conflict on that field alone.
-- [ ] A document parsed from JSON by the model's own bounded parser; a malformed or oversized document is refused with nothing written (fuzz target).
-- [ ] `model/contract` green.
+- [x] A record's fields diff by path; two writers on different fields of one record both land (`TestMergeCombinesFieldsOfOneRecord`, nested fields too; `e2e`: `TestBranchesEditingDifferentFieldsOfOneRecordMerge`; diff per record, `TestDiffIsOneChangePerRecord`).
+- [x] A field deleted on one side and changed on the other is a conflict on that field alone (`TestOneFieldChangedTwoWaysConflictsAtThatRecordNamingTheField`: one field two ways, a record deleted against changed, an untouched sibling record clean, the result ours; `e2e`: `TestOneFieldChangedTwoWaysConflictsAtThatRecordAlone`).
+- [x] A document parsed from JSON by the model's own bounded parser; a malformed or oversized document is refused with nothing written (`TestJSONParsesToOneCanonicalText`, `TestWhatIsNotADocumentIsRefused`, 28 refusals, `TestEncodeIsTheOneText`, `FuzzParse`; the frame, `TestARecordFrameRoundTrips`, `TestAFrameThatIsNotARecordIsRefused`, `FuzzDecodeRecord`; `TestWriteRefusesABadIDOrRecord`, the store's chunk count unchanged).
+- [x] `model/contract` green, the collision case included (`TestContract`); through a repository, `e2e`: `TestADocumentObjectRoundTripsThroughARepository`.
 
 ## Decisions
 
@@ -110,4 +110,7 @@ with their own progress; they import `engine/` alone.
 | the module's first tidy | `go mod tidy` needed `GOPROXY=direct GONOSUMDB=github.com/SmithOperatingSolutions` to fetch the core's transitive sums | Check CI's setup-go with the default proxy on the first push |
 | the cell decoder's fuzzer (table) | A `-0` and an alternative NaN bit pattern decoded and re-encoded differently, so a cell had two spellings | The decoder refuses a float that is not the canonical spelling; the input is a checked-in seed under `model/table/testdata/fuzz` |
 | the second plugin outside the core (table) | `core/internal/wire` is internal, so table carries its own hundred-line bounded reader and writer; `prolly.Open` takes a ReadWriter, so a model reading over a Reader needs an adapter; `model.Change` and `Conflict` carry a `Location []byte` only, so a cell's address is a private encoding (key then column tag) every model invents | To ask of the core: a public bounded wire package, and `mapobject.ReadOnly` for the adapter (in the core's next tag); the location convention is recorded in DESIGN §3 |
+| the third plugin outside the core (document) | `mapobject.Resolver` returns one reason per key, so a record's field conflicts are named in the reason (`field address/city: ...`) rather than located per field; and it cannot return an error, so a stored record that does not decode mid-merge is a conflict rather than a store error | To ask of the core's helper: a resolver returning conflicts with sub-locations, and an error |
+| the document's canonical text | `merge.Node.Canonical()` quotes strings the Go way (`\x..`), which is not JSON | The model owns its canonical text: strict JSON, one spelling per value (DESIGN §3) |
+| redcheck, on the branch over an untagged core | A red whose package needs `model/mapobject` does not build in redcheck's scratch worktree, which has no `go.work`: kv's and document's reds on `core-next` block there | Verified by hand under the workspace: every such red fails on an assertion; judged in full once `go.mod` moves to the core's next tag |
 | redcheck, on a rename | A `test:` commit whose rename touched an existing test file was blocked: redcheck judges every test the commit changed, and those passed without the change | Renames go in a `refactor:` commit of their own; CONTRIBUTING says so |
