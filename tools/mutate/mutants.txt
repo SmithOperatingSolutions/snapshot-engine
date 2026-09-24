@@ -445,3 +445,66 @@ find: case int32:\n\t\treturn int64(x), nil
 replace: case int32:\n\t\treturn x, nil
 pkg: ./model/table
 run: ^TestATableTakesANewSchema$
+
+id: table-merge-primary-key-may-not-change
+file: model/table/schemamerge.go
+find: if !slices.Equal(ours.PrimaryKey, base.PrimaryKey) || !slices.Equal(theirs.PrimaryKey, base.PrimaryKey) {
+replace: if false {
+pkg: ./model/table
+run: ^TestSchemasMergeByTag$
+
+id: table-merge-dropped-and-changed-column-conflicts
+file: model/table/schemamerge.go
+find: if kept != b {\n\t\t\t\tconflicts = append(conflicts, model.Conflict{Location: columnLocation(b.Tag), Reason: "dropped on one side and changed on the other"})
+replace: if kept != b && false {\n\t\t\t\tconflicts = append(conflicts, model.Conflict{Location: columnLocation(b.Tag), Reason: "dropped on one side and changed on the other"})
+pkg: ./model/table
+run: ^TestSchemasMergeByTag$
+
+id: table-merge-attribute-changed-differently-conflicts
+file: model/table/schemamerge.go
+find: if !clean {\n\t\t\treturn Column{}, "the " + attr + " changed differently on both sides"\n\t\t}
+replace: if !clean && false {\n\t\t\treturn Column{}, "the " + attr + " changed differently on both sides"\n\t\t}
+pkg: ./model/table
+run: ^TestSchemasMergeByTag$
+
+id: table-merge-column-added-differently-conflicts
+file: model/table/schemamerge.go
+find: if prev, twice := added[c.Tag]; twice && prev != c {
+replace: if prev, twice := added[c.Tag]; twice && prev != c && false {
+pkg: ./model/table
+run: ^TestSchemasMergeByTag$
+
+id: table-merge-index-changed-differently-conflicts
+file: model/table/schemamerge.go
+find: conflicts = append(conflicts, model.Conflict{Location: indexLocation(b.Tag), Reason: "changed differently on both sides"})
+replace: out = append(out, o)
+pkg: ./model/table
+run: ^TestSchemasMergeByTag$
+
+id: table-merge-additions-come-by-tag
+file: model/table/schemamerge.go
+find: sort.Slice(out, func(i, j int) bool { return out[i].Tag < out[j].Tag })
+replace: sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+pkg: ./model/table
+run: ^TestIndependentSchemaEditsMergeCleanAndSymmetric$
+
+id: table-merge-a-write-to-a-dropped-column-conflicts
+file: model/table/model.go
+find: if !sameCell(from[tag], to[tag]) {\n\t\t\tmg.conflict(columnLocation(tag), "dropped on one side and written to on the other")
+replace: if !sameCell(from[tag], to[tag]) && false {\n\t\t\tmg.conflict(columnLocation(tag), "dropped on one side and written to on the other")
+pkg: ./model/table
+run: ^TestSchemasMergeByTag$
+
+id: table-merge-rewrites-ours-under-the-merged-schema
+file: model/table/model.go
+find: if mt, err = ts[1].WithSchema(ctx, schema); err != nil {
+replace: if mt, err = ts[1], error(nil); err != nil {
+pkg: ./model/table
+run: ^TestAColumnRenamedOnOneSideKeepsTheOthersEdits$
+
+id: table-merge-carries-theirs-across-the-schema
+file: model/table/model.go
+find: conv, err := from.convertRow(row, mg.mt.schema)
+replace: conv, err := row, error(nil)
+pkg: ./model/table
+run: ^TestSchemasMergeByTag$

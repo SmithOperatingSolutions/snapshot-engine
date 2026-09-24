@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk"
@@ -237,8 +238,12 @@ func mergeCell(c Column, base, ours, theirs any) (merged any, conflict bool, err
 	return theirs, false, nil
 }
 
-// Merge implements model.Model for tables of one schema: rows merge
-// independently, cells by mergeCell; two schemas are one conflict.
+// Merge implements model.Model: the schemas merge by tag (mergeSchemas),
+// ours is rewritten under the merged schema, and the rows merge
+// independently, cells by mergeCell, theirs' rows carried across the
+// schema change. A column one side dropped and the other wrote to is a
+// conflict at the column; a row that does not fit the merged schema is a
+// conflict at the row. With any conflict the result is ours, untouched.
 func (m Model) Merge(ctx context.Context, base, ours, theirs model.Root, rw chunk.ReadWriter) (model.MergeResult, error) {
 	var ts [3]*Table
 	for i, r := range []model.Root{base, ours, theirs} {
@@ -247,9 +252,28 @@ func (m Model) Merge(ctx context.Context, base, ours, theirs model.Root, rw chun
 			return model.MergeResult{}, err
 		}
 	}
-	if !bytes.Equal(ts[0].catalog, ts[1].catalog) || !bytes.Equal(ts[0].catalog, ts[2].catalog) {
-		return model.MergeResult{Root: ours, Conflicts: []model.Conflict{{Location: []byte("schema"), Reason: "the tables' schemas differ; a schema merge is not yet defined"}}}, nil
+	schema, conflicts := mergeSchemas(ts[0].schema, ts[1].schema, ts[2].schema, ts[0].catalog, ts[1].catalog, ts[2].catalog)
+	if len(conflicts) > 0 {
+		return model.MergeResult{Root: ours, Conflicts: conflicts}, nil
 	}
+	mt := ts[1]
+	if catalog, err := EncodeCatalog(schema); err != nil {
+		return model.MergeResult{}, err
+	} else if !bytes.Equal(catalog, ts[1].catalog) {
+		if err := ts[1].alterable(schema); err != nil {
+			return model.MergeResult{Root: ours, Conflicts: []model.Conflict{{Location: []byte(schemaLocation), Reason: "ours does not fit the merged schema: " + err.Error()}}}, nil
+		}
+		if err := ts[2].alterable(schema); err != nil {
+			return model.MergeResult{Root: ours, Conflicts: []model.Conflict{{Location: []byte(schemaLocation), Reason: "theirs does not fit the merged schema: " + err.Error()}}}, nil
+		}
+		if mt, err = ts[1].WithSchema(ctx, schema); err != nil {
+			if errors.Is(err, ErrValue) {
+				return model.MergeResult{Root: ours, Conflicts: []model.Conflict{{Location: []byte(schemaLocation), Reason: "ours' rows do not fit the merged schema: " + err.Error()}}}, nil
+			}
+			return model.MergeResult{}, err
+		}
+	}
+	mg := &merger{ts: ts, mt: mt, ed: mt.Edit(), droppedByOurs: droppedBy(ts[0].schema, ts[1].schema), droppedByTheirs: droppedBy(ts[0].schema, ts[2].schema), seen: map[string]bool{}}
 	dOurs, err := prolly.Diff(ctx, ts[0].primary, ts[1].primary)
 	if err != nil {
 		return model.MergeResult{}, err
@@ -258,8 +282,6 @@ func (m Model) Merge(ctx context.Context, base, ours, theirs model.Root, rw chun
 	if err != nil {
 		return model.MergeResult{}, err
 	}
-	ed := ts[1].Edit()
-	var conflicts []model.Conflict
 	co, okO, err := dOurs.Next()
 	if err != nil {
 		return model.MergeResult{}, err
@@ -270,18 +292,24 @@ func (m Model) Merge(ctx context.Context, base, ours, theirs model.Root, rw chun
 	}
 	for (okO || okT) && err == nil {
 		switch {
-		case !okT || (okO && bytes.Compare(co.Key, ct.Key) < 0): // only ours changed it
-			co, okO, err = dOurs.Next()
+		case !okT || (okO && bytes.Compare(co.Key, ct.Key) < 0): // only ours changed it: already in mt
+			if err = mg.wroteDropped(ts[1], co, mg.droppedByTheirs); err == nil {
+				co, okO, err = dOurs.Next()
+			}
 		case !okO || bytes.Compare(ct.Key, co.Key) < 0: // only theirs changed it
-			if err = ed.apply(ts[2], ct); err == nil {
-				ct, okT, err = dTheirs.Next()
+			if err = mg.wroteDropped(ts[2], ct, mg.droppedByOurs); err == nil {
+				if err = mg.apply(ct); err == nil {
+					ct, okT, err = dTheirs.Next()
+				}
 			}
 		default: // both changed it
-			var cs []model.Conflict
-			if cs, err = ed.reconcile(ts, co, ct); err == nil {
-				conflicts = append(conflicts, cs...)
-				if co, okO, err = dOurs.Next(); err == nil {
-					ct, okT, err = dTheirs.Next()
+			if err = mg.wroteDropped(ts[1], co, mg.droppedByTheirs); err == nil {
+				if err = mg.wroteDropped(ts[2], ct, mg.droppedByOurs); err == nil {
+					if err = mg.reconcile(co, ct); err == nil {
+						if co, okO, err = dOurs.Next(); err == nil {
+							ct, okT, err = dTheirs.Next()
+						}
+					}
 				}
 			}
 		}
@@ -289,77 +317,143 @@ func (m Model) Merge(ctx context.Context, base, ours, theirs model.Root, rw chun
 	if err != nil {
 		return model.MergeResult{}, err
 	}
-	if len(conflicts) > 0 {
-		return model.MergeResult{Root: ours, Conflicts: conflicts}, nil
+	if len(mg.conflicts) > 0 {
+		return model.MergeResult{Root: ours, Conflicts: mg.conflicts}, nil
 	}
-	merged, err := ed.Flush(ctx)
+	merged, err := mg.ed.Flush(ctx)
 	if err != nil {
 		return model.MergeResult{}, err
 	}
 	return model.MergeResult{Root: merged.Root()}, nil
 }
 
-// apply makes theirs' change to a row in the merged table.
-func (e *Editor) apply(theirs *Table, c prolly.Change) error {
-	if c.Kind == prolly.Removed {
-		return e.remove(c.Key)
+// merger is one merge's state: the three tables, the merged table under
+// edit, the columns each side dropped, and the conflicts so far.
+type merger struct {
+	ts                             [3]*Table
+	mt                             *Table
+	ed                             *Editor
+	droppedByOurs, droppedByTheirs []Tag
+	conflicts                      []model.Conflict
+	seen                           map[string]bool // conflict locations reported once
+}
+
+func (mg *merger) conflict(loc []byte, reason string) {
+	if mg.seen[string(loc)] {
+		return
 	}
-	key, row, err := theirs.decodeRow(c.Key, c.To)
+	mg.seen[string(loc)] = true
+	mg.conflicts = append(mg.conflicts, model.Conflict{Location: loc, Reason: reason})
+}
+
+// wroteDropped reports a conflict at each column the other side dropped
+// that this side's change wrote to.
+func (mg *merger) wroteDropped(side *Table, c prolly.Change, dropped []Tag) error {
+	if len(dropped) == 0 || c.Kind == prolly.Removed {
+		return nil
+	}
+	_, to, err := side.decodeRow(c.Key, c.To)
 	if err != nil {
 		return err
 	}
-	return e.put(c.Key, key, row)
+	var from Row
+	if c.Kind == prolly.Modified {
+		if _, from, err = mg.ts[0].decodeRow(c.Key, c.From); err != nil {
+			return err
+		}
+	}
+	for _, tag := range dropped {
+		if !sameCell(from[tag], to[tag]) {
+			mg.conflict(columnLocation(tag), "dropped on one side and written to on the other")
+		}
+	}
+	return nil
+}
+
+// apply makes theirs' change to a row in the merged table, carried across
+// the schema change; a row that does not fit is a conflict at the row.
+func (mg *merger) apply(c prolly.Change) error {
+	if c.Kind == prolly.Removed {
+		return mg.ed.remove(c.Key)
+	}
+	key, row, err := mg.ts[2].decodeRow(c.Key, c.To)
+	if err != nil {
+		return err
+	}
+	return mg.putConverted(c.Key, key, row, mg.ts[2])
+}
+
+// putConverted stores row, decoded under from's schema, into the merged
+// table; what does not fit the merged schema is a conflict at the row.
+func (mg *merger) putConverted(kb []byte, key Key, row Row, from *Table) error {
+	conv, err := from.convertRow(row, mg.mt.schema)
+	if err == nil {
+		err = mg.ed.put(kb, key, conv)
+	}
+	if errors.Is(err, ErrValue) || errors.Is(err, ErrSchema) {
+		mg.conflict(bytes.Clone(kb), "the row does not fit the merged schema: "+err.Error())
+		return nil
+	}
+	return err
 }
 
 // reconcile merges both sides' changes to one row: both removed is nothing;
-// one removed is a conflict at the row; otherwise every cell by mergeCell.
-func (e *Editor) reconcile(ts [3]*Table, co, ct prolly.Change) ([]model.Conflict, error) {
+// one removed is a conflict at the row; otherwise every cell of the merged
+// schema by mergeCell, each side's cell carried across its schema change.
+func (mg *merger) reconcile(co, ct prolly.Change) error {
 	switch {
 	case co.Kind == prolly.Removed && ct.Kind == prolly.Removed:
-		return nil, nil
+		return nil
 	case co.Kind == prolly.Removed || ct.Kind == prolly.Removed:
-		return []model.Conflict{{Location: bytes.Clone(co.Key), Reason: "deleted on one side and changed on the other"}}, nil
+		mg.conflict(bytes.Clone(co.Key), "deleted on one side and changed on the other")
+		return nil
 	}
-	var base Row
-	if co.Kind == prolly.Modified {
-		var err error
-		if _, base, err = ts[0].decodeRow(co.Key, co.From); err != nil {
-			return nil, err
+	rows := [3]Row{}
+	var key Key
+	for i, c := range []prolly.Change{co, co, ct} {
+		vb := c.To
+		if i == 0 {
+			if co.Kind != prolly.Modified {
+				continue // added on both sides: no base row
+			}
+			vb = co.From
 		}
-	}
-	key, ours, err := ts[1].decodeRow(co.Key, co.To)
-	if err != nil {
-		return nil, err
-	}
-	_, theirs, err := ts[2].decodeRow(ct.Key, ct.To)
-	if err != nil {
-		return nil, err
+		k, row, err := mg.ts[i].decodeRow(c.Key, vb)
+		if err != nil {
+			return err
+		}
+		if rows[i], err = mg.ts[i].convertRow(row, mg.mt.schema); err != nil {
+			mg.conflict(bytes.Clone(co.Key), "the row does not fit the merged schema: "+err.Error())
+			return nil
+		}
+		key = k
 	}
 	merged := Row{}
-	var conflicts []model.Conflict
-	for _, col := range ts[1].schema.Columns {
-		if ts[1].isKeyColumn(col.Tag) {
-			merged[col.Tag] = ours[col.Tag]
+	before := len(mg.conflicts)
+	for _, col := range mg.mt.schema.Columns {
+		if mg.mt.isKeyColumn(col.Tag) {
+			merged[col.Tag] = rows[1][col.Tag]
 			continue
 		}
-		v, conflict, err := mergeCell(col, base[col.Tag], ours[col.Tag], theirs[col.Tag])
+		v, conflict, err := mergeCell(col, rows[0][col.Tag], rows[1][col.Tag], rows[2][col.Tag])
 		if err != nil {
-			return nil, err
+			mg.conflict(cellLocation(co.Key, col.Tag), "the cell does not fit the merged schema: "+err.Error())
+			continue
 		}
 		if conflict {
 			reason := "changed differently on both sides"
 			if co.Kind == prolly.Added {
 				reason = "added differently on both sides"
 			}
-			conflicts = append(conflicts, model.Conflict{Location: cellLocation(co.Key, col.Tag), Reason: reason})
+			mg.conflict(cellLocation(co.Key, col.Tag), reason)
 			continue
 		}
 		if v != nil {
 			merged[col.Tag] = v
 		}
 	}
-	if len(conflicts) > 0 {
-		return conflicts, nil
+	if len(mg.conflicts) > before {
+		return nil
 	}
-	return nil, e.put(co.Key, key, merged)
+	return mg.putConverted(co.Key, key, merged, mg.mt)
 }
