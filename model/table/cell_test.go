@@ -279,6 +279,40 @@ func TestNegativeNumericsOrderByTheirDigits(t *testing.T) {
 	}
 }
 
+// NaN sorts above every number, +Inf included, in both float widths, and
+// every NaN is one value whatever its sign and payload: a negative NaN's
+// raw bits would otherwise sort below every number, and two payloads would
+// be two values. The property draws such NaNs only on some runs; these
+// cases hold it on every run.
+func TestNaNSortsAboveEveryNumber(t *testing.T) {
+	c8 := table.Column{Tag: 1, Name: "f", Type: table.TypeFloat8}
+	nans8 := []float64{math.NaN(), math.Float64frombits(0xFFF8000000000000), math.Float64frombits(0x7FF0000000000001), math.Float64frombits(0xFFFFFFFFFFFFFFFF)}
+	for _, n := range nans8 {
+		e := enc(t, c8, n)
+		if !bytes.Equal(e, enc(t, c8, nans8[0])) {
+			t.Errorf("NaN %#x encodes as %x, another NaN as %x: every NaN is one value", math.Float64bits(n), e, enc(t, c8, nans8[0]))
+		}
+		for _, v := range []float64{math.Inf(1), math.MaxFloat64, 1, 0, -1, math.Inf(-1)} {
+			if bytes.Compare(enc(t, c8, v), e) >= 0 {
+				t.Errorf("float8 %v does not encode below NaN %#x", v, math.Float64bits(n))
+			}
+		}
+	}
+	c4 := table.Column{Tag: 1, Name: "f", Type: table.TypeFloat4}
+	nans4 := []float32{float32(math.NaN()), math.Float32frombits(0xFFC00000), math.Float32frombits(0x7F800001), math.Float32frombits(0xFFFFFFFF)}
+	for _, n := range nans4 {
+		e := enc(t, c4, n)
+		if !bytes.Equal(e, enc(t, c4, nans4[0])) {
+			t.Errorf("float4 NaN %#x encodes as %x, another NaN as %x", math.Float32bits(n), e, enc(t, c4, nans4[0]))
+		}
+		for _, v := range []float32{float32(math.Inf(1)), math.MaxFloat32, 1, 0, -1, float32(math.Inf(-1))} {
+			if bytes.Compare(enc(t, c4, v), e) >= 0 {
+				t.Errorf("float4 %v does not encode below NaN %#x", v, math.Float32bits(n))
+			}
+		}
+	}
+}
+
 // A value that does not fit its column is refused with ErrValue and no
 // bytes: the wrong Go type, NULL in a column that forbids it, a varchar of
 // 300 characters in a varchar(255) (bytes are not characters: 255 three-byte

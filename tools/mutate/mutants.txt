@@ -178,7 +178,7 @@ file: model/table/cell.go
 find: if math.IsNaN(f) {\n\t\treturn math.MaxUint64\n\t}
 replace: if math.IsNaN(f) && false {\n\t\treturn math.MaxUint64\n\t}
 pkg: ./model/table
-run: ^TestByteOrderIsTheTypesOrder$
+run: ^TestNaNSortsAboveEveryNumber$
 
 id: table-int2-flips-the-sign-bit
 file: model/table/cell.go
@@ -1280,3 +1280,10 @@ find: if aerr := s.db.r.AbortMerge(ctx, s.p, s.branch); aerr != nil {
 replace: if aerr := error(nil); aerr != nil {
 pkg: ./engine
 run: ^TestAMergeThatCannotBeCommittedChangesNothing$
+
+id: table-nan32-sorts-above-everything
+file: model/table/cell.go
+find: if math.IsNaN(float64(f)) {\n\t\treturn math.MaxUint32\n\t}
+replace: if math.IsNaN(float64(f)) && false {\n\t\treturn math.MaxUint32\n\t}
+pkg: ./model/table
+run: ^TestNaNSortsAboveEveryNumber$
