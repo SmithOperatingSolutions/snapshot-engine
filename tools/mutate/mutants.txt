@@ -37,3 +37,45 @@ find: if len(b)-1 > MaxValueSize {
 replace: if len(b)-1 > MaxValueSize && false {
 pkg: ./model/kv
 run: ^TestAFrameThatIsNotAValueIsRefused$
+
+id: kv-a-key-is-1-to-4096-bytes
+file: model/kv/kv.go
+find: if len(k) == 0 || len(k) > MaxKeySize {
+replace: if false {
+pkg: ./model/kv
+run: ^TestWriteRefusesABadKeyOrValue$
+
+id: kv-open-checks-the-format
+file: model/kv/kv.go
+find: if root.Format != Format {\n\t\treturn nil, fmt.Errorf("%w: kv format %d", model.ErrUnknownModel, root.Format)
+replace: if root.Format != Format && false {\n\t\treturn nil, fmt.Errorf("%w: kv format %d", model.ErrUnknownModel, root.Format)
+pkg: ./model/kv
+run: ^TestValidateRefusesWhatIsNotAnObject$
+
+id: kv-open-checks-the-depth
+file: model/kv/kv.go
+find: if root.Depth != 0 {\n\t\treturn nil, fmt.Errorf("%w: a kv root claims stream depth %d", chunk.ErrCorrupt, root.Depth)
+replace: if root.Depth != 0 && false {\n\t\treturn nil, fmt.Errorf("%w: a kv root claims stream depth %d", chunk.ErrCorrupt, root.Depth)
+pkg: ./model/kv
+run: ^TestValidateRefusesWhatIsNotAnObject$
+
+id: kv-open-checks-the-count
+file: model/kv/kv.go
+find: if m.Count() != root.Size {
+replace: if m.Count() != root.Size && false {
+pkg: ./model/kv
+run: ^TestValidateRefusesWhatIsNotAnObject$
+
+id: kv-read-decodes-every-value
+file: model/kv/kv.go
+find: return DecodeValue(frame)
+replace: return Value{Kind: Bytes, Bytes: frame}, nil
+pkg: ./model/kv
+run: ^TestValidateRefusesWhatIsNotAnObject$
+
+id: kv-walk-checks-the-format
+file: model/kv/kv.go
+find: if root.Format != Format {\n\t\treturn fmt.Errorf("%w: kv format %d", model.ErrUnknownModel, root.Format)
+replace: if root.Format != Format && false {\n\t\treturn fmt.Errorf("%w: kv format %d", model.ErrUnknownModel, root.Format)
+pkg: ./model/kv
+run: ^TestWalkNamesEveryChunkOfAnObject$
