@@ -752,3 +752,33 @@ func TestRefsAreResolvedUnderTheirGrants(t *testing.T) {
 		t.Errorf("a merge with a message that is not UTF-8 = %v, want ErrInvalid", err)
 	}
 }
+
+// The scratch store a read compares with reads the repository's chunks,
+// keeps what it is given, answers Has for both, and never writes through:
+// the repository does not hold what the scratch store was given.
+func TestTheScratchStoreReadsTheRepositoryAndKeepsItsOwn(t *testing.T) {
+	d, _, _ := sessDB(t)
+	sc := engine.Scratch(d)
+	head := sessHead(t, d, "main")
+	mine, err := sc.Put(ctx, []byte("a scratch chunk"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := sc.Get(ctx, mine); err != nil || string(got) != "a scratch chunk" {
+		t.Errorf("the scratch store reads its own chunk as %q, %v", got, err)
+	}
+	if _, err := sc.Get(ctx, head); err != nil {
+		t.Errorf("the scratch store does not read the repository's head commit: %v", err)
+	}
+	nobody := engine.Hash{0x01}
+	has, err := sc.Has(ctx, []engine.Hash{mine, head, nobody})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has[mine] || !has[head] || has[nobody] {
+		t.Errorf("Has = %v for its own chunk, the repository's and nobody's; want true, true, false", has)
+	}
+	if repo, err := engine.Chunks(d).Has(ctx, []engine.Hash{mine}); err != nil || repo[mine] {
+		t.Errorf("the repository holds the scratch chunk (%v, %v): the scratch store wrote through", repo, err)
+	}
+}

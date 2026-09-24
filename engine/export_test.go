@@ -85,3 +85,6 @@ func CreateTag(ctx context.Context, d *Database, p auth.Principal, name string, 
 	_, err := d.r.CreateTag(ctx, p, name, commit, "")
 	return err
 }
+
+// Scratch is a scratch store over the database's chunks.
+func Scratch(d *Database) chunk.ReadWriter { return d.scratch() }

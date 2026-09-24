@@ -1259,3 +1259,17 @@ find: if err := message(msg); err != nil {\n\t\treturn MergeResult{}, err\n\t}
 replace: if err := message(msg); err != nil && false {\n\t\treturn MergeResult{}, err\n\t}
 pkg: ./engine
 run: ^TestRefsAreResolvedUnderTheirGrants$
+
+id: session-scratch-reads-the-repository
+file: engine/session.go
+find: if errors.Is(err, chunk.ErrNotFound) {\n\t\treturn s.base.Get(ctx, h)
+replace: if errors.Is(err, chunk.ErrNotFound) && false {\n\t\treturn s.base.Get(ctx, h)
+pkg: ./engine
+run: ^TestTheScratchStoreReadsTheRepositoryAndKeepsItsOwn$
+
+id: session-scratch-has-its-own
+file: engine/session.go
+find: out[h] = out[h] || ok
+replace: out[h] = out[h] || (ok && false)
+pkg: ./engine
+run: ^TestTheScratchStoreReadsTheRepositoryAndKeepsItsOwn$
