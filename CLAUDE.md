@@ -44,6 +44,7 @@ Governing documents, in order of authority:
 
 ```
 mise install          # Go 1.27 + golangci-lint + govulncheck, built from source
+mise run ci           # the core's tools/ci as a Go tool, told the engine's layout: what CI runs
 mise run ci:quick     # fmt, vet, lint, race
 mise run redcheck     # the core's redcheck, as a Go tool (go tool redcheck)
 mise run mutate       # the core's mutate, as a Go tool: every mutant must be killed

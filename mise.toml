@@ -10,14 +10,13 @@ go = "1.27"
 [env]
 CGO_ENABLED = "0"
 
+[tasks.ci]
+description = "Local run-all: the storage core's tools/ci, told the engine's layout (what CI runs)"
+run = 'go tool ci -product merge/,model/,engine/ -adapters='
+
 [tasks."ci:quick"]
 description = "The fast subset of CI: fmt, vet, lint, race suite"
-run = """
-test -z "$(gofmt -l .)" || { gofmt -l .; echo "gofmt: files above need formatting"; exit 1; }
-go vet ./...
-golangci-lint run ./...
-CGO_ENABLED=1 go test -race -count=1 ./...
-"""
+run = 'go tool ci -product merge/,model/,engine/ -adapters= -quick'
 
 [tasks.test]
 description = "Unit, contract, property and golden suites"
@@ -37,10 +36,7 @@ run = "govulncheck ./..."
 
 [tasks.cover]
 description = "Statement coverage per package; every package of ours must reach 90%"
-run = """
-go test -count=1 -covermode=set -coverprofile=coverage.out ./... > /dev/null
-go tool cover -func=coverage.out | awk '$1 == "total:" { print "total", $3 }'
-"""
+run = 'go tool ci -product merge/,model/,engine/ -adapters= -only cover'
 
 [tasks.redcheck]
 description = "Every `test:` commit on this branch fails (on an assertion) without its `feat:`/`fix:` (the core's tool)"
@@ -51,8 +47,5 @@ description = "Re-run the checked-in mutants (tools/mutate/mutants.txt) in throw
 run = "go tool mutate"
 
 [tasks.fuzz]
-description = "Every fuzz target for FUZZTIME each (default 30s)"
-run = """
-for t in $(go test -list '^Fuzz' ./... 2>/dev/null | grep '^Fuzz'); do echo "--- $t"; done
-echo "fuzz targets run per package: go test -run '^$' -fuzz '^FuzzName$' -fuzztime ${FUZZTIME:-30s} ./pkg"
-"""
+description = "Every fuzz target for FUZZTIME each (default 30s; the weekly run uses 10m)"
+run = 'go tool ci -product merge/,model/,engine/ -adapters= -only fuzz'

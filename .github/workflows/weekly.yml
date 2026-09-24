@@ -31,15 +31,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: { go-version-file: go.mod, cache: true }
-      - name: every fuzz target, ten minutes each
-        run: |
-          set -e
-          for pkg in $(go list ./...); do
-            for t in $(go test -list '^Fuzz' "$pkg" | grep '^Fuzz' || true); do
-              echo "--- fuzz $pkg $t"
-              go test -run '^$' -fuzz "^$t\$" -fuzztime 10m "$pkg"
-            done
-          done
+      - run: go tool ci -product merge/,model/,engine/ -adapters= -only fuzz -fuzztime 10m
       - if: failure() # a finding's input, to minimize and check in (CONTRIBUTING)
         uses: actions/upload-artifact@v4
         with:

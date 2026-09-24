@@ -14,16 +14,16 @@ that lands there lands the same way here.
 
 ```
 mise install        # Go 1.27, golangci-lint, govulncheck, all built from source
+mise run ci         # everything CI runs: the core's tools/ci, told the engine's layout
 mise run ci:quick   # fmt, vet, lint, race suite
 mise run redcheck   # every test: commit on the branch fails without its feat:/fix:
 mise run mutate     # every checked-in mutant is killed
 ```
 
-`redcheck` and `mutate` are the storage core's tools, run here through Go's
-`tool` directive (`go tool redcheck`, `go tool mutate`); there is nothing to
-install beyond Go. The core's run-all (`tools/ci`) is wired to the core's
-layout today; until it takes its layout from flags, the remaining gates are
-explicit steps in `mise.toml` and `.github/workflows/ci.yml` (DESIGN D7).
+`ci`, `redcheck` and `mutate` are the storage core's tools, run here through
+Go's `tool` directive (`go tool ci`, `go tool redcheck`, `go tool mutate`);
+there is nothing to install beyond Go. `tools/ci` is told the engine's layout
+(DESIGN D7) and runs the core's gates here unchanged.
 
 ## The loop for every change
 

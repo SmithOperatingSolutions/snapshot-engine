@@ -16,6 +16,7 @@ require (
 )
 
 tool (
+	github.com/SmithOperatingSolutions/snapshot-core/tools/ci
 	github.com/SmithOperatingSolutions/snapshot-core/tools/mutate
 	github.com/SmithOperatingSolutions/snapshot-core/tools/redcheck
 )

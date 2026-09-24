@@ -40,6 +40,7 @@ Files and folders are models the core already ships (`model/blob`,
 
 ```
 mise install          # Go 1.27, golangci-lint, govulncheck, built from source
+mise run ci           # everything CI runs: the core's tools/ci, told the engine's layout
 mise run ci:quick     # fmt, vet, lint, race suite
 mise run redcheck     # every test: commit on the branch fails without its feat:/fix:
 mise run mutate       # every checked-in mutant is killed
