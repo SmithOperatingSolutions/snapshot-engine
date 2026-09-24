@@ -25,6 +25,12 @@ func indexLocation(tag Tag) []byte  { return []byte(fmt.Sprintf("%s/index/%d", s
 // follow the same rules. The primary key may not change. The conflicts are
 // at the tag that could not be combined; with any, the schema is nothing.
 func mergeSchemas(base, ours, theirs Schema, baseCat, oursCat, theirsCat []byte) (Schema, []model.Conflict) {
+	// The rows are matched by their keys, encoded under the base's primary
+	// key: a key changed on either side, however, is checked before any
+	// side is taken whole.
+	if !slices.Equal(ours.PrimaryKey, base.PrimaryKey) || !slices.Equal(theirs.PrimaryKey, base.PrimaryKey) {
+		return Schema{}, []model.Conflict{{Location: []byte(schemaLocation), Reason: "the primary key changed; rows cannot be matched across it"}}
+	}
 	switch {
 	case bytes.Equal(oursCat, theirsCat):
 		return ours, nil
@@ -32,9 +38,6 @@ func mergeSchemas(base, ours, theirs Schema, baseCat, oursCat, theirsCat []byte)
 		return theirs, nil
 	case bytes.Equal(theirsCat, baseCat):
 		return ours, nil
-	}
-	if !slices.Equal(ours.PrimaryKey, base.PrimaryKey) || !slices.Equal(theirs.PrimaryKey, base.PrimaryKey) {
-		return Schema{}, []model.Conflict{{Location: []byte(schemaLocation), Reason: "the primary key changed; rows cannot be matched across it"}}
 	}
 	merged := Schema{PrimaryKey: append([]Tag(nil), base.PrimaryKey...)}
 	var conflicts []model.Conflict
