@@ -1592,3 +1592,17 @@ find: \t\tif more, err := each(id, n); err != nil || !more {
 replace: \t\tif _, err := each(id, n); err != nil {
 pkg: ./engine
 run: ^TestACollectionHandleReadsItsWritesAndRefusesWhatIsNotADocument$
+
+id: engine-txn-kinds-kv-scans-see-own-writes
+file: engine/txn.go
+find: \tif err := m.flush(ctx); err != nil {\n\t\treturn err\n\t}\n\tes, err := m.m.Scan(ctx, from)
+replace: \tif err := error(nil); err != nil {\n\t\treturn err\n\t}\n\tes, err := m.m.Scan(ctx, from)
+pkg: ./engine
+run: ^TestAScanSeesWritesNotYetRead$
+
+id: engine-txn-kinds-collection-scans-see-own-writes
+file: engine/txn.go
+find: \tif err := c.flush(ctx); err != nil {\n\t\treturn err\n\t}\n\trs, err := c.c.Scan(ctx, from)
+replace: \tif err := error(nil); err != nil {\n\t\treturn err\n\t}\n\trs, err := c.c.Scan(ctx, from)
+pkg: ./engine
+run: ^TestAScanSeesWritesNotYetRead$

@@ -457,3 +457,38 @@ func setField(t *testing.T, n engine.Node, field, number string) engine.Node {
 	}
 	return out
 }
+
+// A scan right after a write, with no read between to flush it, sees the
+// write: a kv scan the key just set, a collection scan the record just put.
+func TestAScanSeesWritesNotYetRead(t *testing.T) {
+	_, s := kindsDB(t)
+	tx := txnBegin(t, s)
+	cache := kindsKV(t, tx, "cache")
+	if err := cache.Set(ctx, []byte("c"), kindsBytes("3")); err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	if err := cache.Scan(ctx, nil, func(k []byte, _ engine.Value) (bool, error) {
+		keys = append(keys, string(k))
+		return true, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(keys, ",") != "a,b,c,hits" {
+		t.Errorf("a scan right after setting c = %v, want a,b,c,hits", keys)
+	}
+	users := kindsCollection(t, tx, "users")
+	if err := users.PutJSON(ctx, []byte("u2"), []byte(`{"name": "grace"}`)); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	if err := users.Scan(ctx, nil, func(id []byte, _ engine.Node) (bool, error) {
+		ids = append(ids, string(id))
+		return true, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(ids, ",") != "u1,u2" {
+		t.Errorf("a scan right after putting u2 = %v, want u1,u2", ids)
+	}
+}
