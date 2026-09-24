@@ -1,12 +1,15 @@
 package document_test
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk/memstore"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/model"
+	"github.com/SmithOperatingSolutions/snapshot-core/core/prolly"
 
 	"github.com/SmithOperatingSolutions/snapshot-engine/merge"
 	"github.com/SmithOperatingSolutions/snapshot-engine/model/document"
@@ -122,11 +125,12 @@ func TestMergeCombinesFieldsOfOneRecord(t *testing.T) {
 	}
 }
 
-// One field changed two ways is a conflict at that record, its reason
-// naming the field's path and only that field; the rest of the collection
-// is untouched by it (the result is ours, as the port asks with conflicts).
-// A record deleted on one side and changed on the other conflicts too, and
-// a field deleted on one side and changed on the other within a record.
+// One field changed two ways is a conflict located at that record and that
+// field, and only that field; the rest of the collection is untouched by it
+// (the result is ours, as the port asks with conflicts). A record deleted
+// on one side and changed on the other conflicts at the record as a whole,
+// and a field deleted on one side and changed on the other within a record
+// at that field.
 func TestOneFieldChangedTwoWaysConflictsAtThatRecordNamingTheField(t *testing.T) {
 	s := memstore.New()
 	base := write(t, s, map[string]merge.Node{
@@ -148,26 +152,110 @@ func TestOneFieldChangedTwoWaysConflictsAtThatRecordNamingTheField(t *testing.T)
 		"ok": doc(t, `{"a": 1, "c": 3}`),
 	})
 	r := mergeOf(t, s, base, ours, theirs)
-	byID := map[string]string{}
+	at := map[string]string{} // "id path" -> reason
 	for _, c := range r.Conflicts {
-		byID[string(c.Location)] = c.Reason
+		id, path, err := document.ParseLocation(c.Location)
+		if err != nil {
+			t.Fatalf("a conflict located at %q: %v", c.Location, err)
+		}
+		at[string(id)+" "+path.String()] = c.Reason
 	}
 	if len(r.Conflicts) != 3 {
-		t.Errorf("%d conflicts %+v, want u1, u2 and u3", len(r.Conflicts), r.Conflicts)
+		t.Errorf("%d conflicts %v, want u1's address/city, u2 as a whole and u3's k", len(r.Conflicts), at)
 	}
-	if !strings.Contains(byID["u1"], "address/city") || strings.Contains(byID["u1"], "zip") {
-		t.Errorf("u1's conflict reason %q should name the field address/city and no other", byID["u1"])
+	if reason, ok := at["u1 address/city"]; !ok || reason == "" {
+		t.Errorf("no conflict at u1's field address/city (and only there): %v", at)
 	}
-	if !strings.Contains(byID["u2"], "deleted") {
-		t.Errorf("u2, deleted on one side and changed on the other: %q", byID["u2"])
+	if !strings.Contains(at["u2 "], "deleted") {
+		t.Errorf("u2, deleted on one side and changed on the other, at the record as a whole: %v", at)
 	}
-	if !strings.Contains(byID["u3"], "k") || !strings.Contains(byID["u3"], "deleted") {
-		t.Errorf("u3, field k deleted on one side and changed on the other: %q", byID["u3"])
-	}
-	if _, ok := byID["ok"]; ok {
-		t.Errorf("the record both sides edited on different fields conflicted: %q", byID["ok"])
+	if !strings.Contains(at["u3 k"], "deleted") {
+		t.Errorf("u3's field k, deleted on one side and changed on the other: %v", at)
 	}
 	if r.Root != ours {
 		t.Errorf("with conflicts the result is %+v, want ours %+v", r.Root, ours)
+	}
+}
+
+// Two fields of one record changed two ways are two conflicts, each at its
+// own field; a record whose stored frame does not decode, met mid-merge,
+// aborts the merge with an error: it is the store's problem, not a person's.
+func TestEachFieldConflictIsLocatedAndABadRecordAbortsTheMerge(t *testing.T) {
+	s := memstore.New()
+	base := write(t, s, map[string]merge.Node{"u1": doc(t, `{"a": 1, "b": 1, "c": 1}`)})
+	ours := write(t, s, map[string]merge.Node{"u1": doc(t, `{"a": 2, "b": 2, "c": 1}`)})
+	theirs := write(t, s, map[string]merge.Node{"u1": doc(t, `{"a": 3, "b": 3, "c": 1}`)})
+	r := mergeOf(t, s, base, ours, theirs)
+	var got []string
+	for _, c := range r.Conflicts {
+		id, path, err := document.ParseLocation(c.Location)
+		if err != nil {
+			t.Fatalf("a conflict located at %q: %v", c.Location, err)
+		}
+		got = append(got, string(id)+" "+path.String())
+	}
+	if strings.Join(got, ", ") != "u1 a, u1 b" {
+		t.Errorf("conflicts at %v, want one at u1's a and one at u1's b", got)
+	}
+
+	raw := func(frame []byte) model.Root { // a collection whose u1 is the given bytes
+		t.Helper()
+		pm, err := prolly.Empty(ctx, s, cfg())
+		if err != nil {
+			t.Fatal(err)
+		}
+		e := pm.Editor()
+		if err := e.Put([]byte("u1"), frame); err != nil {
+			t.Fatal(err)
+		}
+		if pm, err = e.Flush(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return model.Root{Hash: pm.Root(), Size: pm.Count(), Format: document.Format}
+	}
+	o, err := document.EncodeRecord(doc(t, `{"a": 2}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	th, err := document.EncodeRecord(doc(t, `{"a": 3}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = document.Model{Config: cfg()}.Merge(ctx, raw([]byte("not a record")), raw(o), raw(th), s)
+	if !errors.Is(err, chunk.ErrCorrupt) {
+		t.Errorf("a merge meeting a record that does not decode = %v, want ErrCorrupt", err)
+	}
+}
+
+// A location carries any id (NUL bytes included) and any field path (a
+// field name may hold '/'), and reads back as written; what Locate did not
+// write is refused.
+func TestLocationsRoundTripAndForgeriesAreRefused(t *testing.T) {
+	for _, tc := range []struct {
+		id   string
+		path merge.Path
+	}{
+		{"u1", nil},
+		{"u1", merge.Path{"address", "city"}},
+		{"\x00id\x00", merge.Path{"a/b", ""}},
+		{strings.Repeat("x", document.MaxIDSize), merge.Path{"k"}},
+	} {
+		id, path, err := document.ParseLocation(document.Locate([]byte(tc.id), tc.path))
+		if err != nil || string(id) != tc.id || len(path) != len(tc.path) || strings.Join(path, "\x01") != strings.Join(tc.path, "\x01") {
+			t.Errorf("Locate(%q, %q) read back as %q, %q, %v", tc.id, tc.path, id, path, err)
+		}
+	}
+	good := document.Locate([]byte("u1"), merge.Path{"a"})
+	for name, loc := range map[string][]byte{
+		"empty":            {},
+		"an empty id":      {0},
+		"a truncated id":   {5, 'u'},
+		"a truncated path": append(append([]byte{}, good...), 3, 'x'),
+		"a long varint":    {0x82, 0x00, 'u', '1'},
+		"an id too long":   append([]byte{0x81, 0x20}, make([]byte, document.MaxIDSize+1)...),
+	} {
+		if _, _, err := document.ParseLocation(loc); err == nil {
+			t.Errorf("%s: a location Locate did not write was read", name)
+		}
 	}
 }

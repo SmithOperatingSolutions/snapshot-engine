@@ -2,7 +2,6 @@ package e2e_test
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/SmithOperatingSolutions/snapshot-core/core/auth"
@@ -196,8 +195,8 @@ func TestBranchesEditingDifferentFieldsOfOneRecordMerge(t *testing.T) {
 	}
 }
 
-// E5: one field of one record changed two ways conflicts at that record
-// alone, the conflict naming the field, and no other record.
+// E5: one field of one record changed two ways conflicts at that record's
+// field alone, and at no other record.
 func TestOneFieldChangedTwoWaysConflictsAtThatRecordAlone(t *testing.T) {
 	h := newDocHost(t, mem.New())
 	h.put(vcs.MainBranch, h.docs("u1", `{"name": "ada", "age": 36}`, "u2", `{"name": "grace"}`))
@@ -217,7 +216,10 @@ func TestOneFieldChangedTwoWaysConflictsAtThatRecordAlone(t *testing.T) {
 		t.Fatalf("the merge reported %d conflicts %+v, want one at %s", len(res.Conflicts), res.Conflicts, h.path)
 	}
 	c := res.Conflicts[0].Model
-	if len(c) != 1 || string(c[0].Location) != "u1" || !strings.Contains(c[0].Reason, "age") {
-		t.Fatalf("the conflict is %+v, want the one record u1 naming the field age", c)
+	if len(c) != 1 {
+		t.Fatalf("the conflict is %+v, want one, at u1's field age", c)
+	}
+	if id, path, err := document.ParseLocation(c[0].Location); err != nil || string(id) != "u1" || path.String() != "age" {
+		t.Fatalf("the conflict is located at %q (%q, %q, %v), want u1's field age", c[0].Location, id, path, err)
 	}
 }

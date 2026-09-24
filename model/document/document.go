@@ -188,3 +188,14 @@ func fields(cs []merge.Conflict) string {
 	}
 	return strings.Join(parts, "; ")
 }
+
+// Locate is the location of a conflict in a collection: the record's id
+// and, for a conflict inside the record, the path of the field, empty for
+// the record as a whole. (Stub.)
+func Locate(id []byte, path merge.Path) []byte { return nil }
+
+// ParseLocation is Locate's inverse; it refuses what Locate did not write.
+// (Stub.)
+func ParseLocation(loc []byte) (id []byte, path merge.Path, err error) {
+	return nil, nil, fmt.Errorf("%w: ParseLocation is not implemented", ErrID)
+}
