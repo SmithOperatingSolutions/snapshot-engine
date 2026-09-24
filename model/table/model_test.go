@@ -306,6 +306,12 @@ func subject(t *testing.T) contract.Subject {
 			sort.Slice(rows, func(i, j int) bool { return rows[i][1].(int64) < rows[j][1].(int64) })
 			return serialize(schema, rows)
 		},
+		Collide: func(c []byte, seed uint64) (ours, theirs []byte) { // one row's name cell, two ways
+			schema, o := parse(t, c)
+			_, th := parse(t, c)
+			o[0][2], th[0][2] = fmt.Sprintf("%s-ours%d", o[0][2], seed), fmt.Sprintf("%s-theirs%d", th[0][2], seed)
+			return serialize(schema, o), serialize(schema, th)
+		},
 		Write: func(t *testing.T, c []byte) model.Root {
 			t.Helper()
 			schema, rows := parse(t, c)
