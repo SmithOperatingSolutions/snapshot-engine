@@ -67,7 +67,7 @@ declared. Order-preserving key encoding so byte order is SQL order, NULLs
 first. Diff is per row then per cell; merge is schema first, then rows, then
 cells, through the merge library. Serves Postgres and MySQL.
 
-**`model/kv`** (id 4). An ordered map from key to value, where each value has
+**`model/kv`** (id 6). An ordered map from key to value, where each value has
 a kind and each kind a merge policy: opaque bytes (last writer wins, conflict
 on concurrent change), counter (sum of deltas), set (union with deletions),
 hash (a map merged per field), sorted set (a map keyed by score then member),
@@ -75,13 +75,14 @@ sequence (an ordered list with its own merge). Serves Redis, and is the
 smallest real model: the first one built, because it proves the plugin port
 from outside the core at low cost.
 
-**`model/document`** (id 5). Records by id, each a tree of fields with no
+**`model/document`** (id 4, the spec's "JSON document", `model/json` in its table). Records by id, each a tree of fields with no
 schema; diff and merge by field path through the merge library. Serves Mongo.
 Most of it is the merge library and the key encoding table already has.
 
 The ids come from the Storage Core Spec's registry table, which is the
-registry of record; 4 and 5 are proposed here and are added there before
-either model ships (DESIGN D3).
+registry of record: table 3 and JSON document 4 are listed there (5 is
+reserved for time series); kv 6 is proposed here and is added there before
+the model ships (DESIGN D3).
 
 ## The merge library
 

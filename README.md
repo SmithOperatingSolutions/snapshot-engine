@@ -21,8 +21,8 @@ and every checklist item in [`docs/PROGRESS.md`](docs/PROGRESS.md).
 ```
 merge/            three-way merge of typed values, trees, sets, counters, sequences   (no core dependency)
 model/table       rows with a schema and indexes; Postgres and MySQL                   (model id 3)
-model/kv          an ordered map of typed values with a merge policy each; Redis       (model id 4)
-model/document    schemaless records merged by field path; Mongo                       (model id 5)
+model/kv          an ordered map of typed values with a merge policy each; Redis       (model id 6)
+model/document    schemaless records merged by field path; Mongo                       (model id 4)
 engine/           Database, Session, Txn: the API adapters and programs use           (L5)
 e2e/              a repository driven through engine/ alone
 tools/mutate/     the checked-in mutant catalog (run by the core's tool)

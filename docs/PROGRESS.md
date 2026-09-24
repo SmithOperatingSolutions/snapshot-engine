@@ -97,9 +97,9 @@ with their own progress; they import `engine/` alone.
   `docs/specs/engine-layers.md`, DESIGN D1 to D7.
 - **Pure Go** (2026-09-24): `CGO_ENABLED=0` here and in every adapter; a cgo
   SQL parser is refused. DESIGN D4.
-- **Model ids** (2026-09-24): table 3 per the Storage Core Spec; kv 4 and
-  document 5 proposed, to be added to the core's registry table before either
-  ships. DESIGN D3.
+- **Model ids** (2026-09-24): table 3 and document 4 per the Storage Core
+  Spec's registry table (5 is its time series); kv 6 proposed, to be added
+  there before it ships. DESIGN D3.
 
 ## What testing found
 
