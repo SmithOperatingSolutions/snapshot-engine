@@ -1309,3 +1309,158 @@ find: case errors.Is(err, vcs.ErrBranchInUse):\n\t\tto = ErrInUse
 replace: case errors.Is(err, vcs.ErrBranchInUse):\n\t\tto = ErrInvalid
 pkg: ./engine
 run: ^TestABranchASessionIsOnCannotBeDeleted$
+
+# engine grants
+id: grants-a-protected-branch-takes-no-direct-write
+file: engine/grants.go
+find: return !g.protected[branch] && (onBranch(PermWrite) || onAnObject(scopes, branch))
+replace: return (onBranch(PermWrite) || onAnObject(scopes, branch))
+pkg: ./engine
+run: ^TestRevokeAndProtect$
+
+id: grants-an-object-writer-may-write-its-branch
+file: engine/grants.go
+find: return !g.protected[branch] && (onBranch(PermWrite) || onAnObject(scopes, branch))
+replace: return !g.protected[branch] && (onBranch(PermWrite))
+pkg: ./engine
+run: ^TestGrantsMapTheCoresQuestions$
+
+id: grants-an-object-grant-covers-its-object
+file: engine/grants.go
+find: scopes[Scope{Branch: branch, Object: path}].has(PermWrite)
+replace: scopes[Scope{Branch: branch, Object: path}].has(PermRead)
+pkg: ./engine
+run: ^TestGrantsMapTheCoresQuestions$
+
+id: grants-a-branch-grant-covers-its-objects
+file: engine/grants.go
+find: return db.has(PermWrite) || scopes[Scope{Branch: branch}].has(PermWrite) || scopes[Scope{Branch: branch, Object: path}].has(PermWrite)
+replace: return db.has(PermWrite) || scopes[Scope{Branch: branch, Object: path}].has(PermWrite)
+pkg: ./engine
+run: ^TestGrantsMapTheCoresQuestions$
+
+id: grants-branch-read-is-the-branchs
+file: engine/grants.go
+find: case auth.Read:\n\t\t\treturn onBranch(PermRead)
+replace: case auth.Read:\n\t\t\treturn anywhere(scopes, PermRead)
+pkg: ./engine
+run: ^TestGrantsMapTheCoresQuestions$
+
+id: grants-commit-is-its-own-permission
+file: engine/grants.go
+find: return onBranch(PermCommit)
+replace: return onBranch(PermWrite)
+pkg: ./engine
+run: ^TestGrantsMapTheCoresQuestions$
+
+id: grants-merge-is-its-own-permission
+file: engine/grants.go
+find: return onBranch(PermMerge)
+replace: return onBranch(PermCommit)
+pkg: ./engine
+run: ^TestGrantsMapTheCoresQuestions$
+
+id: grants-tags-are-managed-database-wide
+file: engine/grants.go
+find: case auth.Manage:\n\t\t\treturn db.has(PermBranchAdmin)
+replace: case auth.Manage:\n\t\t\treturn anywhere(scopes, PermBranchAdmin)
+pkg: ./engine
+run: ^TestGrantsMapTheCoresQuestions$
+
+id: grants-repository-reads-need-read-somewhere
+file: engine/grants.go
+find: case "repo":\n\t\tswitch a {\n\t\tcase auth.Read:\n\t\t\treturn anywhere(scopes, PermRead)
+replace: case "repo":\n\t\tswitch a {\n\t\tcase auth.Read:\n\t\t\treturn db.has(PermRead)
+pkg: ./engine
+run: ^TestGrantsMapTheCoresQuestions$
+
+id: grants-a-resource-part-is-never-empty
+file: engine/grants.go
+find: if !ok || rest == "" {
+replace: if !ok {
+pkg: ./engine
+run: ^TestGrantsDenyWhatTheyDoNotKnow$
+
+id: grants-a-path-names-branch-and-object
+file: engine/grants.go
+find: if !ok || b == "" || p == "" {
+replace: if !ok {
+pkg: ./engine
+run: ^TestGrantsDenyWhatTheyDoNotKnow$
+
+id: grants-an-object-scope-takes-write-alone
+file: engine/grants.go
+find: case s.Object != "" && p != PermWrite:
+replace: case false:
+pkg: ./engine
+run: ^TestAGrantThatNamesNothingIsRefused$
+
+id: grants-admin-is-the-databases
+file: engine/grants.go
+find: case p == PermAdmin && s != (Scope{}):
+replace: case false:
+pkg: ./engine
+run: ^TestAGrantThatNamesNothingIsRefused$
+
+id: grants-a-grant-needs-a-principal
+file: engine/grants.go
+find: if principal == "" {\n\t\treturn fmt.Errorf("%w: a grant needs a principal", ErrInvalid)
+replace: if false {\n\t\treturn fmt.Errorf("%w: a grant needs a principal", ErrInvalid)
+pkg: ./engine
+run: ^TestAGrantThatNamesNothingIsRefused$
+
+id: grants-a-grant-needs-a-permission
+file: engine/grants.go
+find: if len(perms) == 0 {
+replace: if false {
+pkg: ./engine
+run: ^TestAGrantThatNamesNothingIsRefused$
+
+id: grants-a-permission-is-known
+file: engine/grants.go
+find: case p < PermRead || p > PermAdmin:
+replace: case false:
+pkg: ./engine
+run: ^TestAGrantThatNamesNothingIsRefused$
+
+id: grants-an-object-scope-needs-its-branch
+file: engine/grants.go
+find: case s.Branch == "" && s.Object != "":
+replace: case false:
+pkg: ./engine
+run: ^TestAGrantThatNamesNothingIsRefused$
+
+id: grants-a-scope-branch-holds-no-colon
+file: engine/grants.go
+find: case strings.Contains(s.Branch, ":"):
+replace: case false:
+pkg: ./engine
+run: ^TestAGrantThatNamesNothingIsRefused$
+
+id: grants-an-object-path-is-valid
+file: engine/grants.go
+find: if err := object.ValidPath(s.Object); err != nil {
+replace: if err := object.ValidPath(s.Object); err != nil && false {
+pkg: ./engine
+run: ^TestAGrantThatNamesNothingIsRefused$
+
+id: grants-protect-names-a-branch
+file: engine/grants.go
+find: if branch == "" || strings.Contains(branch, ":") {
+replace: if false {
+pkg: ./engine
+run: ^TestAGrantThatNamesNothingIsRefused$
+
+id: grants-revoke-takes-back
+file: engine/grants.go
+find: scopes[s] &^= 1 << p
+replace: scopes[s] &^= 1 << (p - p)
+pkg: ./engine
+run: ^TestRevokeAndProtect$
+
+id: grants-unprotect-lifts
+file: engine/grants.go
+find: delete(g.protected, branch)
+replace: _ = branch
+pkg: ./engine
+run: ^TestRevokeAndProtect$
