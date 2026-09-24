@@ -41,8 +41,8 @@ type JSONB []byte
 
 // Limits on a cell.
 const (
-	MaxCellLen     = 64 << 10 // the longest encoded cell
-	MaxNumericLen  = 1000     // digits in a numeric's text
+	MaxCellLen     = 1 << 20 // the longest encoded cell; a row past the map's inline limit is a stream
+	MaxNumericLen  = 1000    // digits in a numeric's text
 	maxNumericDigs = 1000
 )
 

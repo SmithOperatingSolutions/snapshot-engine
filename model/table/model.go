@@ -92,3 +92,15 @@ func (m Model) Diff(ctx context.Context, from, to model.Root, r chunk.Reader) (m
 func (m Model) Merge(ctx context.Context, base, ours, theirs model.Root, rw chunk.ReadWriter) (model.MergeResult, error) {
 	return model.MergeResult{}, errors.New("table: not implemented")
 }
+
+// Locate is the model's address of a row (column 0) or of one cell of it:
+// the encoded key, then for a cell the column's tag, big-endian.
+func (t *Table) Locate(key Key, column Tag) ([]byte, error) {
+	return nil, errors.New("table: not implemented")
+}
+
+// ParseLocation reads what Locate wrote: the key, and the column (0 for the
+// row itself).
+func (t *Table) ParseLocation(loc []byte) (Key, Tag, error) {
+	return nil, 0, errors.New("table: not implemented")
+}
