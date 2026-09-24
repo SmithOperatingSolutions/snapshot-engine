@@ -16,7 +16,8 @@ import (
 )
 
 // serialize is an object's content in a canonical text form: one line per
-// entry in key order, the key and the payload in hex.
+// entry in key order, the key and the value's frame in hex. A frame is the
+// value's one spelling, so the text is canonical for every kind.
 func serialize(es map[string]kv.Value) []byte {
 	keys := make([]string, 0, len(es))
 	for k := range es {
@@ -25,7 +26,11 @@ func serialize(es map[string]kv.Value) []byte {
 	sort.Strings(keys)
 	var b bytes.Buffer
 	for _, k := range keys {
-		fmt.Fprintf(&b, "%s\t%s\n", hex.EncodeToString([]byte(k)), hex.EncodeToString(es[k].Bytes))
+		f, err := kv.EncodeValue(es[k])
+		if err != nil {
+			panic(err) // the fixtures are values
+		}
+		fmt.Fprintf(&b, "%s\t%s\n", hex.EncodeToString([]byte(k)), hex.EncodeToString(f))
 	}
 	return b.Bytes()
 }
@@ -42,20 +47,31 @@ func parse(t *testing.T, b []byte) map[string]kv.Value {
 		if err != nil {
 			t.Fatal(err)
 		}
-		v, err := hex.DecodeString(f[1])
+		frame, err := hex.DecodeString(f[1])
 		if err != nil {
 			t.Fatal(err)
 		}
-		es[string(k)] = kv.Value{Kind: kv.Bytes, Bytes: v}
+		v, err := kv.DecodeValue(frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		es[string(k)] = v
 	}
 	return es
 }
 
+// generate is an object holding every kind: bytes, a counter, a set, a
+// hash, a sorted set and a sequence, all a pure function of seed.
 func generate(seed uint64) map[string]kv.Value {
 	es := map[string]kv.Value{}
 	for i := 0; i < int(seed%30)+3; i++ {
 		es[fmt.Sprintf("key:%d:%d", seed%5, i)] = bytesValue(fmt.Sprintf("value %d/%d", seed, i))
 	}
+	es["visits"] = counter(int64(seed)*7 - 3)
+	es["tags"] = set(member(fmt.Sprintf("t%d", seed), seed+1), member("common", 1), member("common", seed+2))
+	es["user"] = fields("name", fmt.Sprintf("u%d", seed), "mail", "u@x", "n", fmt.Sprint(seed))
+	es["board"] = zset(scored("ann", float64(seed%7), 1), scored("bob", 2.5, 2), scored(fmt.Sprintf("p%d", seed), -1, seed+3))
+	es["queue"] = seq("a", fmt.Sprintf("job%d", seed), "z")
 	return es
 }
 
