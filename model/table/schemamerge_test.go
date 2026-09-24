@@ -65,6 +65,18 @@ func withIndex(s table.Schema, ix table.Index) table.Schema {
 	return s
 }
 
+// withRows inserts people rows 1..n into tb.
+func withRows(t *testing.T, tb *table.Table, n int) *table.Table {
+	t.Helper()
+	e := tb.Edit()
+	for i := 1; i <= n; i++ {
+		if _, err := e.Insert(person(int64(i), fmt.Sprintf("name%d", i), int32(20+i), fmt.Sprintf("p%d@x", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return flush(t, e)
+}
+
 func open(t *testing.T, s chunk.ReadWriter, root model.Root) *table.Table {
 	t.Helper()
 	tb, err := table.Open(ctx, s, cfg(), root)
@@ -120,10 +132,61 @@ func TestSchemasMergeByTag(t *testing.T) {
 	phone := table.Column{Tag: 5, Name: "phone", Type: table.TypeText, Nullable: true}
 	for name, tc := range map[string]struct {
 		ours, theirs  func(s table.Schema) table.Schema
-		edit          func(e *table.Editor) error // theirs' row edit, if any
+		fresh         func(t *testing.T, s chunk.ReadWriter) *table.Table // theirs built anew, where WithSchema would refuse the change
+		freshOurs     bool                                                // ours is the same fresh table
+		edit          func(e *table.Editor) error                         // theirs' row edit, if any
 		wantConflicts []string
 		check         func(t *testing.T, merged *table.Table)
 	}{
+		"the primary key changed the same way on both sides": { // rows cannot be matched to the base's
+			fresh: func(t *testing.T, s chunk.ReadWriter) *table.Table {
+				return withRows(t, create(t, s, withKey(people(), []table.Tag{2})), 3)
+			},
+			freshOurs:     true,
+			wantConflicts: []string{"schema"},
+		},
+		"the primary key changed on one side": {
+			fresh: func(t *testing.T, s chunk.ReadWriter) *table.Table {
+				return withRows(t, create(t, s, withKey(people(), []table.Tag{2})), 3)
+			},
+			wantConflicts: []string{"schema"},
+		},
+		"a NOT NULL column added on one side": {
+			fresh: func(t *testing.T, s chunk.ReadWriter) *table.Table {
+				tb := create(t, s, withColumn(people(), table.Column{Tag: 6, Name: "must", Type: table.TypeBool}))
+				e := tb.Edit()
+				for i := int64(1); i <= 3; i++ {
+					row := person(i, fmt.Sprintf("name%d", i), int32(20+i), fmt.Sprintf("p%d@x", i))
+					row[6] = true
+					if _, err := e.Insert(row); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return flush(t, e)
+			},
+			wantConflicts: []string{"schema"},
+		},
+		"a column dropped on one side and changed on the other": {
+			ours:          func(s table.Schema) table.Schema { return dropped(s, 4) },
+			theirs:        func(s table.Schema) table.Schema { return withType(s, 4, table.TypeVarchar, 300) },
+			wantConflicts: []string{"schema/4"},
+		},
+		"a type widened on one side, a row edited and one added on the other": {
+			ours: func(s table.Schema) table.Schema { return withType(s, 3, table.TypeInt8, 0) },
+			edit: func(e *table.Editor) error {
+				if err := e.Update(table.Key{int64(2)}, person(2, "name2", int32(99), "p2@x")); err != nil {
+					return err
+				}
+				_, err := e.Insert(person(4, "name4", int32(24), "p4@x"))
+				return err
+			},
+			check: func(t *testing.T, merged *table.Table) {
+				_, rows := scanAll(t, merged)
+				if len(rows) != 4 || rows[1][3] != int64(99) || rows[3][3] != int64(24) {
+					t.Errorf("rows after the widening, the edit and the insert: %v; want four, row 2's age int64 99 and row 4's int64 24", rows)
+				}
+			},
+		},
 		"a column added on one side": {
 			theirs: func(s table.Schema) table.Schema { return withColumn(s, phone) },
 			check: func(t *testing.T, merged *table.Table) {
@@ -208,6 +271,20 @@ func TestSchemasMergeByTag(t *testing.T) {
 				}
 			},
 		},
+		"an index dropped on one side and changed on the other": {
+			ours:          func(s table.Schema) table.Schema { s.Indexes = nil; return s },
+			theirs:        func(s table.Schema) table.Schema { return withIndex(s, table.Index{Tag: 10, Columns: []table.Tag{2}}) },
+			wantConflicts: []string{"schema/index/10"},
+		},
+		"a row deleted on one side across a schema change on the other": {
+			ours: func(s table.Schema) table.Schema { return renamed(s, 2, "full_name") },
+			edit: func(e *table.Editor) error { return e.Delete(table.Key{int64(3)}) },
+			check: func(t *testing.T, merged *table.Table) {
+				if keys, _ := scanAll(t, merged); len(keys) != 2 {
+					t.Errorf("the merged table holds %d rows, want the two left after the delete", len(keys))
+				}
+			},
+		},
 		"an index changed differently on both sides": {
 			ours:          func(s table.Schema) table.Schema { return withIndex(s, table.Index{Tag: 10, Columns: []table.Tag{2}}) },
 			theirs:        func(s table.Schema) table.Schema { return withIndex(s, table.Index{Tag: 10, Columns: []table.Tag{4}}) },
@@ -223,6 +300,12 @@ func TestSchemasMergeByTag(t *testing.T) {
 			}
 			if tc.theirs != nil {
 				theirs = alter(t, base, tc.theirs(people()))
+			}
+			if tc.fresh != nil {
+				theirs = tc.fresh(t, s)
+				if tc.freshOurs {
+					ours = theirs
+				}
 			}
 			if tc.edit != nil {
 				theirs = edit(t, theirs, tc.edit)
