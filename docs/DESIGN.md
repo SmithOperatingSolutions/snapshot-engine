@@ -20,6 +20,8 @@ the decisions and the layer table the build enforces.
 | D9 | Sequence conflicts | `Sequence` is a diff3 over element keys aligned by LCS; both-inserted blocks at one position are kept in key order and flagged; two changes to one stretch conflict and the base stretch stays in the value, so the result is a merge only when `Clean()` | Deterministic, side-neutral, and never invents an order the writers did not |
 | D10 | Trees | A JSON-like `Node` (null, bool, number as canonical text, string, array, object with sorted fields) merged by path; arrays merge as sequences keyed by the element's canonical form; `TreeOptions.Counter` names the paths whose integers add, and a non-integer there is a conflict | One tree merge serves a document, a JSON cell and a Redis hash |
 
+| D11 | A sequence both sides inserted into at one position | Clean: both blocks kept in key order, `merge.Result.Flagged` set. The plugin port offers only a conflict, which would stop a merge a writer need not resolve; the engine API (E4) is where a flag reaches a caller | Nothing is lost and the order is deterministic; a conflict would block a merge on something that needs no decision |
+
 ## 2. Layers (enforced by depguard, `.golangci.yml`)
 
 | Layer | Packages | May import (ours) | May import (core) |
@@ -45,10 +47,25 @@ here as they do.
 **kv, format 1** (`model/kv`, id 6). An object is a prolly map under
 `Model.Config`; its `model.Root` claims `Format 1`, `Size` = the entry count,
 `Depth 0`. A key is 1 to 4096 bytes (`prolly.MaxKeySize`), any bytes. A value
-is a frame `kind u8 · payload`: kind 1 is Bytes, its payload at most 256 KiB
-(`MaxValueSize`); kind 0 and unknown kinds are refused on encode and decode;
-the decoder copies the payload. Further kinds (counter, set, hash, sorted set,
-sequence) take further kind bytes (E3).
+is a frame `kind u8 · payload`, the payload at most 256 KiB (`MaxValueSize`),
+counts bounded, every kind canonical (members in order, no repeats, no
+trailing bytes); kind 0 and unknown kinds are refused on encode and decode:
+
+| Kind | Payload | Merge of a key both sides changed |
+| --- | --- | --- |
+| 1 Bytes | raw bytes | equal is clean; different is a conflict at the key |
+| 2 Counter | i64 as u64 little-endian | both sides' deltas from base add (`merge.Counter`) |
+| 3 Set | count uvarint, then per member `tag u64 · elem`, sorted, no repeats | observed-remove over write tags (`merge.Set`, D8), always clean |
+| 4 Hash | count, then `name · value`, both length-prefixed, sorted by name | per field; one field changed differently is a conflict at that field |
+| 5 SortedSet | count, then `score f64 · tag u64 · member`, ordered by score then member; NaN refused, −0 written as 0 | per member by tag; a score changed differently is a conflict at that member |
+| 6 Sequence | count, then length-prefixed elements | `merge.Sequence` (D9); concurrent inserts at one position are both kept, clean (D11) |
+
+A kind changed on one side and the value on the other, or two different
+kinds, is a conflict at the key; a frame that does not decode mid-merge
+aborts the merge with `ErrValue`. *Location*: a change (Diff) is at the bare
+key; a conflict at `uvarint(len(key)) · key · sub`, `sub` the hash field or
+sorted-set member at fault, empty for the key as a whole (`kv.Location`,
+`kv.ParseLocation`).
 
 **table, format 1** (`model/table`, id 3). Little-endian unless said. The
 object's root chunk is the *root record*: `"VDTR"` · version u16 (1) ·

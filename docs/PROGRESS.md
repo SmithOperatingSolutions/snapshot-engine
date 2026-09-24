@@ -13,7 +13,7 @@ collection, and the Engine Spec's L0 to L3 checklists and security rows.
 See [snapshot-core's PROGRESS](https://github.com/SmithOperatingSolutions/snapshot-core/blob/main/docs/PROGRESS.md).
 The engine takes the core by tag (`go.mod`) and never tracks its items here.
 
-**Updated 2026-09-24** · E1 and E2 done; E0 done but for the first PR; E3 and E5 built on the branch that waits for the core's next tag
+**Updated 2026-09-24** · E1 and E2 done on main; E3 and E5 done on `core-next`, which waits for the core's next tag; E0 done but for the first PR; E4, the engine API, next
 
 ## Milestones
 
@@ -22,7 +22,7 @@ The engine takes the core by tag (`go.mod`) and never tracks its items here.
 | **E0 Foundations** | 🚧 (one item waits for the first PR) | The module on snapshot-core v0.1.0; the gates (fmt, vet, lint with the layer table, vuln, race, coverage, redcheck, mutants); `model/kv` at the bytes kind, passing the core's `model/contract` from outside the core, end to end through a repository; 23 mutants, 91% covered | A deliberately failing `test:` commit blocks a PR (first PR); a kv object round-trips through a repository and two branches setting different keys merge clean ✅ |
 | **E1 Merge library** | ✅ Done | `merge/`: `Scalar`, `Counter`, `Set` (observed-remove over write tags), `Sequence` (diff3 over element keys), `Tree` (a JSON-like `Node` merged by path, arrays as sequences, counter paths by option); conflicts as values with a path and a reason, never repaired; 97% covered, 11 mutants | Every policy has a property test: deterministic, one-sided change returns that side, symmetric (`TestScalarAndCounterProperties`, `TestSetProperties`, `TestSequenceProperties`, `TestTreeProperties`) |
 | **E2 Tables** | ✅ Done | `model/table`: catalog with tagged columns, order-preserving cell encoding for every v1 type, primary and index maps, a hidden row id, the row API, `WithSchema`; diff per row then cell; merge of schemas by column tag then of rows under the merged schema, cells through the merge library; three decoders, three fuzz targets; 37 mutants, 90% covered | Every E2 item below green ✅ |
-| **E3 Key-value** | | `model/kv` whole: bytes, counter, set, hash, sorted set, sequence, each with its policy | Every E3 item below green |
+| **E3 Key-value** | ✅ Done (on `core-next`) | `model/kv` whole: bytes, counter, set (write tags), hash, sorted set, sequence, each a canonical bounded frame with a fuzz target and a merge policy through the merge library; conflicts located at the key and the field or member; 93% covered | Every E3 item below green ✅ |
 | **E4 Engine API** | | `engine/`: `Database`, `Session`, `Txn`; snapshot isolation; optimistic commit through the models' merge; authorization on every call; commit, branch, merge, diff, log | Every E4 item below green; `e2e/` drives a repository through `engine/` alone |
 | **E5 Documents** | ✅ Done (on `core-next`, which waits for the core's next tag) | `model/document`: records by id as canonical JSON behind a versioned frame, the model's own bounded JSON parser, diff per record, merge by field path through the merge library on the core's `model/mapobject`; 21 mutants, 92% covered | Every E5 item below green ✅ |
 
@@ -63,12 +63,12 @@ with their own progress; they import `engine/` alone.
 - [x] `model/contract` green (`TestContract`); the walk reaches a long cell's stream (`TestWalkNamesALongCellsChunks`); store faults surface everywhere (`TestStoreFaultsAreReported`).
 
 ### E3 Key-value (`model/kv`)
-- [ ] Every value kind round-trips through its decoder; every decoder has a fuzz target.
-- [ ] A counter incremented on two branches merges to the sum.
-- [ ] A set added to on one branch and removed from on the other keeps the observed-remove rule.
-- [ ] A hash merged per field; a sorted set keyed by score then member keeps its order across a merge.
-- [ ] A sequence with concurrent inserts merges deterministically and flags the position.
-- [ ] `model/contract` green for every kind.
+- [x] Every value kind round-trips through its decoder; every decoder has a fuzz target (`TestEveryKindRoundTrips`, `TestKindFramesAreTheDocumentedEncodings`, `TestKindFramesThatAreNotValuesAreRefused`, `FuzzDecodeValue` with seeds of every kind).
+- [x] A counter incremented on two branches merges to the sum (`TestACounterIncrementedOnTwoBranchesMergesToTheSum`, two equal decrements counting twice).
+- [x] A set added to on one branch and removed from on the other keeps the observed-remove rule (`TestASetAddedToAndRemovedFromKeepsTheObservedRemoveRule`).
+- [x] A hash merged per field; a sorted set keyed by score then member keeps its order across a merge (`TestAHashMergesPerField`, two fields two located conflicts; `TestASortedSetKeepsItsOrderAcrossAMerge`).
+- [x] A sequence with concurrent inserts merges deterministically; both blocks are kept in key order and the merge is clean (D11) (`TestASequenceWithConcurrentInsertsMergesDeterministically`).
+- [x] `model/contract` green for every kind (`TestContract`); a kind changed on one side conflicts (`TestAKindChangedOnOneSideConflicts`); locations (`TestALocationNamesAKeyAndWhatIsBelowIt`); a frame that does not decode mid-merge is an error (`TestAFrameThatDoesNotDecodeMidMergeIsAnError`); a Redis-shaped workload of every kind branches and merges through a repository (`e2e`: `TestARedisShapedWorkloadBranchesAndMerges`).
 
 ### E4 Engine API (`engine/`; the Engine Spec's L4 transactions and authorization)
 - [ ] `Open(ctx, principal)` on a branch; `Checkout`, `Branch`, `Log`.
@@ -111,6 +111,7 @@ with their own progress; they import `engine/` alone.
 | the cell decoder's fuzzer (table) | A `-0` and an alternative NaN bit pattern decoded and re-encoded differently, so a cell had two spellings | The decoder refuses a float that is not the canonical spelling; the input is a checked-in seed under `model/table/testdata/fuzz` |
 | the second plugin outside the core (table) | `core/internal/wire` is internal, so table carries its own hundred-line bounded reader and writer; `prolly.Open` takes a ReadWriter, so a model reading over a Reader needs an adapter; `model.Change` and `Conflict` carry a `Location []byte` only, so a cell's address is a private encoding (key then column tag) every model invents | To ask of the core: a public bounded wire package, and `mapobject.ReadOnly` for the adapter (in the core's next tag); the location convention is recorded in DESIGN §3 |
 | the third plugin outside the core (document) | `mapobject.Resolver` returns one reason per key, so a record's field conflicts are named in the reason (`field address/city: ...`) rather than located per field; and it cannot return an error, so a stored record that does not decode mid-merge is a conflict rather than a store error | The core's helper gained `MergeWith` and a `Decider` (conflicts located below the key; an error aborts the merge); the document model locates every field conflict (`TestEachFieldConflictIsLocatedAndABadRecordAbortsTheMerge`, `TestLocationsRoundTripAndForgeriesAreRefused`) |
+| kv's kind resolver | A shortcut that took two equal changes as one made two equal counter decrements count once | Only counters treat equal changes as two changes (`TestACounterIncrementedOnTwoBranchesMergesToTheSum`) |
 | the document's canonical text | `merge.Node.Canonical()` quotes strings the Go way (`\x..`), which is not JSON | The model owns its canonical text: strict JSON, one spelling per value (DESIGN §3) |
 | redcheck, on the branch over an untagged core | A red whose package needs `model/mapobject` does not build in redcheck's scratch worktree, which has no `go.work`: kv's and document's reds on `core-next` block there | Verified by hand under the workspace: every such red fails on an assertion; judged in full once `go.mod` moves to the core's next tag |
 | redcheck, on a rename | A `test:` commit whose rename touched an existing test file was blocked: redcheck judges every test the commit changed, and those passed without the change | Renames go in a `refactor:` commit of their own; CONTRIBUTING says so |
