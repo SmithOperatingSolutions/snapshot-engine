@@ -782,3 +782,33 @@ func TestTheScratchStoreReadsTheRepositoryAndKeepsItsOwn(t *testing.T) {
 		t.Errorf("the repository holds the scratch chunk (%v, %v): the scratch store wrote through", repo, err)
 	}
 }
+
+// A clean merge is applied and committed as one call: a principal who may
+// merge but not commit is refused, and the branch is as it was, not left
+// mid-merge (its head, its working set, no merge in progress).
+func TestAMergeThatCannotBeCommittedChangesNothing(t *testing.T) {
+	d, s, g := sessDB(t)
+	sessKV(t, d, "main", "config", map[string]string{"a": "1"})
+	sessCommit(t, d, "main", "base")
+	if err := s.CreateBranch(ctx, "feature", ""); err != nil {
+		t.Fatal(err)
+	}
+	sessKV(t, d, "feature", "config", map[string]string{"a": "1", "b": "2"})
+	sessCommit(t, d, "feature", "feature")
+	head, ws := sessHead(t, d, "main"), sessWS(t, d, "main")
+	g.set(auth.Commit, "branch:main", true)
+	_, err := s.Merge(ctx, "feature", "m")
+	g.set(auth.Commit, "branch:main", false)
+	if !errors.Is(err, engine.ErrPermissionDenied) {
+		t.Fatalf("a clean merge by a principal who may not commit = %v, want ErrPermissionDenied", err)
+	}
+	if sessHead(t, d, "main") != head || sessWS(t, d, "main") != ws {
+		t.Error("the refused merge changed main's head or working set")
+	}
+	if cur, err := engine.WorkingSetOf(ctx, d, sessAdmin, "main"); err != nil || cur.Merge != nil {
+		t.Errorf("the refused merge left main mid-merge (%+v, %v)", cur.Merge, err)
+	}
+	if r, err := s.Merge(ctx, "feature", "m"); err != nil || len(r.Conflicts) != 0 {
+		t.Errorf("positive control: the merge with both grants = %+v, %v", r, err)
+	}
+}
