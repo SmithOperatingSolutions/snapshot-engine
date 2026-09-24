@@ -64,6 +64,11 @@ func FuzzDecodeValue(f *testing.F) {
 	f.Add([]byte{byte(kv.Bytes), 'a', 'b'})
 	f.Add([]byte{0})
 	f.Add([]byte{})
+	f.Add([]byte{byte(kv.Counter), 5, 0, 0, 0, 0, 0, 0, 0})
+	f.Add([]byte{byte(kv.Set), 1, 7, 0, 0, 0, 0, 0, 0, 0, 1, 'a'})
+	f.Add([]byte{byte(kv.Hash), 1, 1, 'f', 1, 'v'})
+	f.Add([]byte{byte(kv.SortedSet), 1, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f, 1, 0, 0, 0, 0, 0, 0, 0, 1, 'm'})
+	f.Add([]byte{byte(kv.Sequence), 2, 1, 'x', 1, 'y'})
 	f.Fuzz(func(t *testing.T, b []byte) {
 		v, err := kv.DecodeValue(b)
 		if err != nil {
