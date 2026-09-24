@@ -652,29 +652,29 @@ run: ^TestASetAddedToAndRemovedFromKeepsTheObservedRemoveRule$
 
 id: kv-resolve-hash-per-field
 file: model/kv/resolve.go
-find: merged, reason = mergeHash(base, o, th)
-replace: merged, reason = o, ""
+find: merged, conflicts = mergeHash(key, base, o, th)
+replace: merged, conflicts = o, nil
 pkg: ./model/kv
 run: ^TestAHashMergesPerField$
 
 id: kv-resolve-hash-field-conflicts
 file: model/kv/resolve.go
-find: if !r.Clean() {\n\t\t\tconflicts = append(conflicts, fmt.Sprintf("field %q: %s", n, r.Conflicts[0].Reason))\n\t\t\tcontinue\n\t\t}
-replace: if !r.Clean() && false {\n\t\t\tconflicts = append(conflicts, fmt.Sprintf("field %q: %s", n, r.Conflicts[0].Reason))\n\t\t\tcontinue\n\t\t}
+find: if !r.Clean() {\n\t\t\tconflicts = append(conflicts, model.Conflict{Location: Location(key, []byte(n)), Reason: "field " + scalarReason(fo.present, ft.present)})
+replace: if !r.Clean() && false {\n\t\t\tconflicts = append(conflicts, model.Conflict{Location: Location(key, []byte(n)), Reason: "field " + scalarReason(fo.present, ft.present)})
 pkg: ./model/kv
 run: ^TestAHashMergesPerField$
 
 id: kv-resolve-sorted-set-per-member
 file: model/kv/resolve.go
-find: merged, reason = mergeSortedSet(base, o, th)
-replace: merged, reason = o, ""
+find: merged, conflicts = mergeSortedSet(key, base, o, th)
+replace: merged, conflicts = o, nil
 pkg: ./model/kv
 run: ^TestASortedSetKeepsItsOrderAcrossAMerge$
 
 id: kv-resolve-sequence-by-position
 file: model/kv/resolve.go
-find: merged, reason = mergeSequence(base, o, th)
-replace: merged, reason = o, ""
+find: merged, conflicts = mergeSequence(key, base, o, th)
+replace: merged, conflicts = o, nil
 pkg: ./model/kv
 run: ^TestASequenceWithConcurrentInsertsMergesDeterministically$
 
@@ -691,3 +691,38 @@ find: if ours.Kind == prolly.Removed || theirs.Kind == prolly.Removed {
 replace: if false {
 pkg: ./model/kv
 run: ^TestMergeIsThreeWayPerKey$
+
+id: kv-location-prefixes-the-key-length
+file: model/kv/location.go
+find: out := binary.AppendUvarint(make([]byte, 0, binary.MaxVarintLen64+len(key)+len(sub)), uint64(len(key)))
+replace: out := make([]byte, 0, len(key)+len(sub))
+pkg: ./model/kv
+run: ^TestALocationNamesAKeyAndWhatIsBelowIt$
+
+id: kv-location-refuses-a-bad-key-length
+file: model/kv/location.go
+find: if n == 0 || n > uint64(len(loc)-w) {
+replace: if n > uint64(len(loc)-w) {
+pkg: ./model/kv
+run: ^TestALocationNamesAKeyAndWhatIsBelowIt$
+
+id: kv-decide-a-frame-that-does-not-decode-is-an-error
+file: model/kv/resolve.go
+find: o, err := DecodeValue(ours.To)\n\tif err != nil {\n\t\treturn mapobject.Decision{}, fmt.Errorf("kv: our value under %q: %w", key, err)\n\t}
+replace: o, err := DecodeValue(ours.To)\n\tif err != nil {\n\t\treturn atKey(key, err.Error()), nil\n\t}
+pkg: ./model/kv
+run: ^TestAFrameThatDoesNotDecodeMidMergeIsAnError$
+
+id: kv-decide-sorted-set-member-located
+file: model/kv/resolve.go
+find: conflicts = append(conflicts, model.Conflict{Location: Location(key, []byte(m.Elem)), Reason: "score " + scalarReason(so.present, st.present)})
+replace: conflicts = append(conflicts, model.Conflict{Location: Location(key, nil), Reason: "score " + scalarReason(so.present, st.present)})
+pkg: ./model/kv
+run: ^TestASortedSetKeepsItsOrderAcrossAMerge$
+
+id: kv-decide-a-deleted-field-says-so
+file: model/kv/resolve.go
+find: if !oursPresent || !theirsPresent {
+replace: if false {
+pkg: ./model/kv
+run: ^TestAHashMergesPerField$

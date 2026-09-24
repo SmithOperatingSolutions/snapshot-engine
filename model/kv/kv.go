@@ -141,10 +141,8 @@ func (m Model) Diff(ctx context.Context, from, to model.Root, r chunk.Reader) (m
 }
 
 // Merge implements model.Model, per key: what only one side changed lands,
-// a key both set to the same value is clean, and a key both changed
-// differently, or deleted on one side and changed on the other, is a
-// conflict at that key (mapobject.Disagreement). Further value kinds bring
-// their own resolver (E3).
+// and a key both changed is decided by the kind of its value (decide);
+// conflicts are located with Location.
 func (m Model) Merge(ctx context.Context, base, ours, theirs model.Root, rw chunk.ReadWriter) (model.MergeResult, error) {
-	return spec(m.Config).Merge(ctx, base, ours, theirs, rw, resolve)
+	return spec(m.Config).MergeWith(ctx, base, ours, theirs, rw, decide)
 }

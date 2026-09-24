@@ -6,78 +6,102 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/SmithOperatingSolutions/snapshot-core/core/model"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/prolly"
 	"github.com/SmithOperatingSolutions/snapshot-core/model/mapobject"
 
 	"github.com/SmithOperatingSolutions/snapshot-engine/merge"
 )
 
-// resolve decides a key both sides changed from base, by the kind of its
+// decide resolves a key both sides changed from base, by the kind of its
 // value (docs/specs/engine-layers.md, "model/kv"): bytes take one side or
-// conflict; a counter adds both sides' deltas, even equal ones; a set merges as an
-// observed-remove set over write tags; a hash per field; a sorted set per
-// member; a sequence by element identity and position. A deletion on
-// either side, a value changed to different kinds on both sides, or a kind
-// changed on one side follow mapobject.Disagreement. The conflict's location
-// is the key (the helper's); the field or member at fault is in the reason.
+// conflict; a counter adds both sides' deltas, even equal ones; a set
+// merges as an observed-remove set over write tags; a hash per field; a
+// sorted set per member; a sequence by element identity and position. A
+// deletion on either side, a key added on both, a value changed to
+// different kinds on both sides, or a kind changed on one side follow
+// mapobject.Disagreement. Every conflict is located with Location: at the
+// key, or below it at the hash field or sorted-set member at fault. A
+// stored frame that does not decode is a broken object, an error.
 //
 // A sequence merge the library flags (both sides inserted at one position;
 // both blocks kept in key order) is clean here: the port has a conflict and
 // nothing softer, the result is deterministic and documented (D9), and the
 // engine API is where a flag would be surfaced to a caller who asks.
-func resolve(key []byte, ours, theirs prolly.Change) (value []byte, put bool, reason string) {
+func decide(key []byte, ours, theirs prolly.Change) (mapobject.Decision, error) {
 	if ours.Kind == prolly.Removed || theirs.Kind == prolly.Removed {
-		return mapobject.Disagreement(key, ours, theirs)
+		return disagreement(key, ours, theirs), nil
 	}
 	o, err := DecodeValue(ours.To)
 	if err != nil {
-		return nil, false, "our value is not a value: " + err.Error()
+		return mapobject.Decision{}, fmt.Errorf("kv: our value under %q: %w", key, err)
 	}
 	th, err := DecodeValue(theirs.To)
 	if err != nil {
-		return nil, false, "their value is not a value: " + err.Error()
-	}
-	if o.Kind != th.Kind {
-		return nil, false, fmt.Sprintf("changed to different kinds on both sides (%d and %d)", o.Kind, th.Kind)
+		return mapobject.Decision{}, fmt.Errorf("kv: their value under %q: %w", key, err)
 	}
 	var base Value
 	if ours.From != nil {
 		if base, err = DecodeValue(ours.From); err != nil {
-			return nil, false, "the base value is not a value: " + err.Error()
+			return mapobject.Decision{}, fmt.Errorf("kv: the base value under %q: %w", key, err)
 		}
+	}
+	if o.Kind != th.Kind {
+		return atKey(key, fmt.Sprintf("changed to different kinds on both sides (%d and %d)", o.Kind, th.Kind)), nil
 	}
 	if ours.From == nil || base.Kind != o.Kind || (o.Kind != Counter && bytes.Equal(ours.To, theirs.To)) {
 		// Added on both sides, the kind changed on both, or the same value
 		// on both: nothing to merge over, and Disagreement says whether the
 		// two agree. Only a counter's equal changes are two changes, whose
 		// deltas both count.
-		return mapobject.Disagreement(key, ours, theirs)
+		return disagreement(key, ours, theirs), nil
 	}
 	var merged Value
+	var conflicts []model.Conflict
 	switch o.Kind {
-	case Bytes:
-		return mapobject.Disagreement(key, ours, theirs)
 	case Counter:
 		merged = Value{Kind: Counter, Counter: merge.Counter(base.Counter, o.Counter, th.Counter)}
 	case Set:
 		merged = Value{Kind: Set, Members: fromMembers(merge.Set(toMembers(base.Members), toMembers(o.Members), toMembers(th.Members)))}
 	case Hash:
-		merged, reason = mergeHash(base, o, th)
+		merged, conflicts = mergeHash(key, base, o, th)
 	case SortedSet:
-		merged, reason = mergeSortedSet(base, o, th)
+		merged, conflicts = mergeSortedSet(key, base, o, th)
 	case Sequence:
-		merged, reason = mergeSequence(base, o, th)
-	default:
-		return nil, false, fmt.Sprintf("kind %d has no merge", o.Kind)
+		merged, conflicts = mergeSequence(key, base, o, th)
+	default: // Bytes: two different values
+		return disagreement(key, ours, theirs), nil
 	}
-	if reason != "" {
-		return nil, false, reason
+	if len(conflicts) > 0 {
+		return mapobject.Decision{Conflicts: conflicts}, nil
 	}
 	f, err := EncodeValue(merged)
 	if err != nil {
-		return nil, false, "the merged value cannot be framed: " + err.Error()
+		return mapobject.Decision{}, fmt.Errorf("kv: the merged value under %q: %w", key, err)
 	}
-	return f, true, ""
+	return mapobject.Decision{Value: f, Put: true}, nil
+}
+
+// disagreement is mapobject.Disagreement with its conflict located as kv's.
+func disagreement(key []byte, ours, theirs prolly.Change) mapobject.Decision {
+	value, put, reason := mapobject.Disagreement(key, ours, theirs)
+	if reason != "" {
+		return atKey(key, reason)
+	}
+	return mapobject.Decision{Value: value, Put: put}
+}
+
+func atKey(key []byte, reason string) mapobject.Decision {
+	return mapobject.Decision{Conflicts: []model.Conflict{{Location: Location(key, nil), Reason: reason}}}
+}
+
+// scalarReason says why a field or score both sides changed does not
+// merge: one side took it away, or the two gave it different values.
+func scalarReason(oursPresent, theirsPresent bool) string {
+	if !oursPresent || !theirsPresent {
+		return "deleted on one side and changed on the other"
+	}
+	return "changed differently on both sides"
 }
 
 // toMembers is a set as the merge library sees it: tagged members.
@@ -107,8 +131,8 @@ type field struct {
 }
 
 // mergeHash merges per field: a field changed on one side lands, the same
-// field changed differently on both is a conflict naming it.
-func mergeHash(base, o, th Value) (Value, string) {
+// field changed differently on both is a conflict located at that field.
+func mergeHash(key []byte, base, o, th Value) (Value, []model.Conflict) {
 	names := map[string]bool{}
 	for _, v := range []Value{base, o, th} {
 		for n := range v.Fields {
@@ -116,18 +140,19 @@ func mergeHash(base, o, th Value) (Value, string) {
 		}
 	}
 	merged := Value{Kind: Hash, Fields: map[string][]byte{}}
-	var conflicts []string
+	var conflicts []model.Conflict
 	for _, n := range sortedNames(names) {
-		r := merge.Scalar(fieldOf(base, n), fieldOf(o, n), fieldOf(th, n))
+		fo, ft := fieldOf(o, n), fieldOf(th, n)
+		r := merge.Scalar(fieldOf(base, n), fo, ft)
 		if !r.Clean() {
-			conflicts = append(conflicts, fmt.Sprintf("field %q: %s", n, r.Conflicts[0].Reason))
+			conflicts = append(conflicts, model.Conflict{Location: Location(key, []byte(n)), Reason: "field " + scalarReason(fo.present, ft.present)})
 			continue
 		}
 		if r.Value.present {
 			merged.Fields[n] = []byte(r.Value.value)
 		}
 	}
-	return merged, strings.Join(conflicts, "; ")
+	return merged, conflicts
 }
 
 func fieldOf(v Value, name string) field {
@@ -146,11 +171,11 @@ func sortedNames(set map[string]bool) []string {
 
 // mergeSortedSet merges presence as a set of tagged members and, for every
 // member present in the result, its score as a scalar: a score changed
-// differently on both sides is a conflict naming the member.
-func mergeSortedSet(base, o, th Value) (Value, string) {
+// differently on both sides is a conflict located at the member.
+func mergeSortedSet(key []byte, base, o, th Value) (Value, []model.Conflict) {
 	present := merge.Set(scoredMembers(base.Scores), scoredMembers(o.Scores), scoredMembers(th.Scores))
 	merged := Value{Kind: SortedSet}
-	var conflicts []string
+	var conflicts []model.Conflict
 	keys := make([]merge.Tagged[string], 0, len(present))
 	for m, ok := range present {
 		if ok {
@@ -164,9 +189,10 @@ func mergeSortedSet(base, o, th Value) (Value, string) {
 		return keys[i].Tag < keys[j].Tag
 	})
 	for _, m := range keys {
-		r := merge.Scalar(scoreOf(base, m), scoreOf(o, m), scoreOf(th, m))
+		so, st := scoreOf(o, m), scoreOf(th, m)
+		r := merge.Scalar(scoreOf(base, m), so, st)
 		if !r.Clean() {
-			conflicts = append(conflicts, fmt.Sprintf("member %q: score %s", m.Elem, r.Conflicts[0].Reason))
+			conflicts = append(conflicts, model.Conflict{Location: Location(key, []byte(m.Elem)), Reason: "score " + scalarReason(so.present, st.present)})
 			continue
 		}
 		s := r.Value
@@ -179,7 +205,7 @@ func mergeSortedSet(base, o, th Value) (Value, string) {
 		}
 		merged.Scores = append(merged.Scores, Scored{Member: []byte(m.Elem), Score: s.value, Tag: uint64(m.Tag)})
 	}
-	return merged, strings.Join(conflicts, "; ") // EncodeValue orders the scores
+	return merged, conflicts // EncodeValue orders the scores
 }
 
 // score is a sorted-set member's score as a scalar the merge library
@@ -208,15 +234,16 @@ func scoreOf(v Value, m merge.Tagged[string]) score {
 
 // mergeSequence merges by element identity and position through the
 // library's diff3; a flagged position (both sides inserted there) is clean
-// and deterministic, two changes to one stretch a conflict.
-func mergeSequence(base, o, th Value) (Value, string) {
+// and deterministic, two changes to one stretch a conflict at the key
+// naming the position.
+func mergeSequence(key []byte, base, o, th Value) (Value, []model.Conflict) {
 	r := merge.Sequence(base.Seq, o.Seq, th.Seq, func(e []byte) string { return string(e) })
 	if !r.Clean() {
 		reasons := make([]string, 0, len(r.Conflicts))
 		for _, c := range r.Conflicts {
 			reasons = append(reasons, fmt.Sprintf("sequence at %s: %s", c.Path, c.Reason))
 		}
-		return Value{}, strings.Join(reasons, "; ")
+		return Value{}, []model.Conflict{{Location: Location(key, nil), Reason: strings.Join(reasons, "; ")}}
 	}
-	return Value{Kind: Sequence, Seq: r.Value}, ""
+	return Value{Kind: Sequence, Seq: r.Value}, nil
 }
