@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -20,6 +21,7 @@ var errFault = errors.New("injected: the backend fails")
 type faultBlobs struct {
 	blob.BlobStore
 	gets, roots, puts atomic.Bool
+	log               scrubLog // the database's Logger: where a failure's details go
 }
 
 func (f *faultBlobs) Get(ctx context.Context, name string, off, n int64) (io.ReadCloser, error) {
@@ -54,10 +56,18 @@ func (f *faultBlobs) SwapRoot(ctx context.Context, expected blob.Version, next [
 // heal turns every fault off.
 func (f *faultBlobs) heal() { f.gets.Store(false); f.roots.Store(false); f.puts.Store(false) }
 
-// faultFailed says a call failed because the backend did: the caller sees
-// the backend's failure as it stands, or ErrInternal once scrubbed.
-func faultFailed(err error) bool {
-	return errors.Is(err, errFault) || errors.Is(err, engine.ErrInternal)
+// failed says a call failed because the backend did: the caller holds
+// ErrInternal and a correlation id and nothing of the fault, and the log
+// holds the injected fault itself under that id, so an operator can see
+// what went wrong.
+func (f *faultBlobs) failed(err error) bool {
+	var e *engine.Error
+	if !errors.Is(err, engine.ErrInternal) || !errors.As(err, &e) || errors.Is(err, errFault) {
+		return false
+	}
+	f.log.mu.Lock()
+	defer f.log.mu.Unlock()
+	return strings.Contains(f.log.entries[e.Correlation], errFault.Error())
 }
 
 const faultN = 3000
@@ -71,6 +81,7 @@ func faultDB(t *testing.T) (engine.Options, *engine.Database, *engine.Session, *
 	o := dbOptions(t)
 	fb := &faultBlobs{BlobStore: o.Blobs}
 	o.Blobs = fb
+	o.Logger = &fb.log
 	db, err := engine.Create(ctx, alice, o)
 	if err != nil {
 		t.Fatal(err)
@@ -173,25 +184,25 @@ func TestFinishedAndDroppedKVAndCollectionsRefuse(t *testing.T) {
 func TestABackendFailingAReadFailsTheCall(t *testing.T) {
 	_, _, s, fb := faultDB(t)
 	fb.roots.Store(true)
-	if _, err := s.Begin(ctx); !faultFailed(err) {
+	if _, err := s.Begin(ctx); !fb.failed(err) {
 		t.Errorf("Begin with the root unreadable = %v, want the backend's failure", err)
 	}
 	fb.heal()
 	fb.gets.Store(true)
-	if _, err := s.Begin(ctx); !faultFailed(err) {
+	if _, err := s.Begin(ctx); !fb.failed(err) {
 		t.Errorf("Begin with objects unreadable (a fresh process, nothing cached) = %v, want the backend's failure", err)
 	}
 	fb.heal()
 
 	tx := txnBegin(t, s)
 	fb.gets.Store(true)
-	if _, err := tx.Table(ctx, "people"); !faultFailed(err) {
+	if _, err := tx.Table(ctx, "people"); !fb.failed(err) {
 		t.Errorf("opening a table the backend cannot read = %v, want its failure", err)
 	}
-	if _, err := tx.KV(ctx, "cache"); !faultFailed(err) {
+	if _, err := tx.KV(ctx, "cache"); !fb.failed(err) {
 		t.Errorf("opening a kv map the backend cannot read = %v, want its failure", err)
 	}
-	if _, err := tx.Collection(ctx, "users"); !faultFailed(err) {
+	if _, err := tx.Collection(ctx, "users"); !fb.failed(err) {
 		t.Errorf("opening a collection the backend cannot read = %v, want its failure", err)
 	}
 	fb.heal()
@@ -216,7 +227,7 @@ func TestABackendFailingAReadFailsTheCall(t *testing.T) {
 			return users.Scan(ctx, []byte("u"+far), func([]byte, engine.Node) (bool, error) { return true, nil })
 		},
 	} {
-		if err := call(); !faultFailed(err) {
+		if err := call(); !fb.failed(err) {
 			t.Errorf("%s with the backend failing reads = %v, want its failure", name, err)
 		}
 	}
@@ -232,10 +243,10 @@ func TestABackendFailingAReadFailsTheCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	fb.gets.Store(true)
-	if _, _, err := cache2.Get(ctx, []byte("k00000")); !faultFailed(err) {
+	if _, _, err := cache2.Get(ctx, []byte("k00000")); !fb.failed(err) {
 		t.Errorf("a kv read flushing a write the backend cannot merge = %v, want its failure", err)
 	}
-	if _, _, err := users2.Get(ctx, []byte("u00000")); !faultFailed(err) {
+	if _, _, err := users2.Get(ctx, []byte("u00000")); !fb.failed(err) {
 		t.Errorf("a collection read flushing a write the backend cannot merge = %v, want its failure", err)
 	}
 }
@@ -256,7 +267,7 @@ func TestABackendFailingACommitWritesNothing(t *testing.T) {
 	}
 	check := func(what string, err error) {
 		t.Helper()
-		if !faultFailed(err) {
+		if !fb.failed(err) {
 			t.Errorf("a commit with %s = %v, want the backend's failure", what, err)
 		}
 		fb.heal()
