@@ -16,6 +16,10 @@ the decisions and the layer table the build enforces.
 | D6 | What an adapter may import | `engine/` alone. `engine` re-exports what an adapter needs of the core (`engine.Principal` is `auth.Principal`) so an adapter never imports the core or a model | The API is the boundary the spec's rule 5 asks for; an adapter cannot reach past it by accident |
 | D7 | Tooling until the core's `tools/ci` runner is layout-agnostic | `redcheck` and `mutate` as Go tools now; fmt, vet, lint, vuln, race and coverage as explicit steps in `mise.toml` and CI. When the core's `tools/ci` takes its product packages and coverage gate from flags, this module runs it as a tool too | The runner is wired to the core's `core/` and `model/` layout today; the process rules it enforces apply here from the first commit regardless |
 
+| D8 | Set semantics in the merge library | Observed-remove over write tags: a member is `Tagged{Elem, Tag}`, and a removal drops the tags it saw, so a member removed on one side and re-added on the other (a new tag) is present. A model that stores no per-add tag uses one tag per member and loses re-add semantics; kv stores a tag per member | The only set merge that is both deterministic and matches what two writers meant |
+| D9 | Sequence conflicts | `Sequence` is a diff3 over element keys aligned by LCS; both-inserted blocks at one position are kept in key order and flagged; two changes to one stretch conflict and the base stretch stays in the value, so the result is a merge only when `Clean()` | Deterministic, side-neutral, and never invents an order the writers did not |
+| D10 | Trees | A JSON-like `Node` (null, bool, number as canonical text, string, array, object with sorted fields) merged by path; arrays merge as sequences keyed by the element's canonical form; `TreeOptions.Counter` names the paths whose integers add, and a non-integer there is a conflict | One tree merge serves a document, a JSON cell and a Redis hash |
+
 ## 2. Layers (enforced by depguard, `.golangci.yml`)
 
 | Layer | Packages | May import (ours) | May import (core) |

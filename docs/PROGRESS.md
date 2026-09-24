@@ -13,15 +13,14 @@ collection, and the Engine Spec's L0 to L3 checklists and security rows.
 See [snapshot-core's PROGRESS](https://github.com/SmithOperatingSolutions/snapshot-core/blob/main/docs/PROGRESS.md).
 The engine takes the core by tag (`go.mod`) and never tracks its items here.
 
-**Updated 2026-09-24** · scaffold: the module, its gates, and the engine API's
-boundary type; no model yet
+**Updated 2026-09-24** · E1 done: the merge library; kv and table in progress
 
 ## Milestones
 
 | Milestone | Status | Delivers | Exit criteria |
 | --- | --- | --- | --- |
 | **E0 Foundations** | 🚧 | The module on snapshot-core v0.1.0; the gates (fmt, vet, lint with the layer table, vuln, race, coverage, redcheck, mutants); `model/kv` at one value kind, passing the core's `model/contract` from outside the core | A deliberately failing `test:` commit blocks a PR; a kv object round-trips through a repository and two branches setting different keys merge clean |
-| **E1 Merge library** | | `merge/`: scalars by policy, trees by path, sets, counters, sequences; conflicts reported, never repaired | Every policy has a property test: deterministic, one-sided change returns that side, symmetric where the policy is |
+| **E1 Merge library** | ✅ Done | `merge/`: `Scalar`, `Counter`, `Set` (observed-remove over write tags), `Sequence` (diff3 over element keys), `Tree` (a JSON-like `Node` merged by path, arrays as sequences, counter paths by option); conflicts as values with a path and a reason, never repaired; 97% covered, 11 mutants | Every policy has a property test: deterministic, one-sided change returns that side, symmetric (`TestScalarAndCounterProperties`, `TestSetProperties`, `TestSequenceProperties`, `TestTreeProperties`) |
 | **E2 Tables** | | `model/table`: catalog with tagged columns, order-preserving tuple encoding, primary and secondary indexes, diff per row then cell, merge schema first | Every E2 item below green |
 | **E3 Key-value** | | `model/kv` whole: bytes, counter, set, hash, sorted set, sequence, each with its policy | Every E3 item below green |
 | **E4 Engine API** | | `engine/`: `Database`, `Session`, `Txn`; snapshot isolation; optimistic commit through the models' merge; authorization on every call; commit, branch, merge, diff, log | Every E4 item below green; `e2e/` drives a repository through `engine/` alone |
@@ -42,13 +41,13 @@ with their own progress; they import `engine/` alone.
 - [ ] Every kv structure on disk has a bounds-checked decoder and a fuzz target.
 
 ### E1 Merge library (`merge/`)
-- [ ] Scalars: equal is clean; one side changed is that side; both changed differently is a conflict.
-- [ ] Counters: both sides' deltas add.
-- [ ] Trees: different fields both land; the same field is a scalar merge at that path; deleted on one side and changed on the other is a conflict.
-- [ ] Sets: union of additions minus deletions; removed on one side and re-added on the other is present.
-- [ ] Sequences: concurrent inserts at one position land in a deterministic order and are flagged.
-- [ ] **Property:** every policy is deterministic and returns either side unchanged when the other made no change.
-- [ ] **Property:** a policy declared symmetric gives the same result with ours and theirs swapped.
+- [x] Scalars: equal is clean; one side changed is that side; both changed differently is a conflict (`TestScalarsMergeByWhoChanged`).
+- [x] Counters: both sides' deltas add (`TestCountersAddTheirDeltas`); a counter path holding a non-integer is a conflict, not a repair (`TestTreesMergeByPath`, mutant `merge-tree-counter-refuses-a-non-integer`).
+- [x] Trees: different fields both land; the same field is a scalar merge at that path; deleted on one side and changed on the other is a conflict; arrays merge as sequences keyed by the element's canonical form (`TestTreesMergeByPath`).
+- [x] Sets: union of additions minus deletions; removed on one side and re-added on the other is present, by write tags (`TestSetsKeepAdditionsDropRemovalsAndKeepReAdds`).
+- [x] Sequences: concurrent inserts at one position land in a deterministic order and are flagged; two changes to one stretch conflict and the base stretch is kept (`TestSequencesMergeByIdentityAndPosition`).
+- [x] **Property:** every policy is deterministic and returns either side unchanged when the other made no change (`TestScalarAndCounterProperties`, `TestSetProperties`, `TestSequenceProperties`, `TestTreeProperties`).
+- [x] **Property:** every policy is symmetric in ours and theirs, and documented so; conflict reasons are worded side-neutral so symmetry holds (the same tests).
 
 ### E2 Tables (`model/table`; the Engine Spec's L4 storage layout and encoding)
 - [ ] **Property:** for random values of each v1 type, `decode(encode(v)) == v`.
