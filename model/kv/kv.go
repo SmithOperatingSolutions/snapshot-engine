@@ -1,6 +1,7 @@
 package kv
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -40,8 +41,6 @@ func (Model) ID() model.ID { return ID }
 
 // FormatVersion implements model.Model.
 func (Model) FormatVersion() uint16 { return Format }
-
-var errNotImplemented = errors.New("kv: not implemented")
 
 // readOnly opens a map over a Reader: reading one never writes.
 type readOnly struct{ chunk.Reader }
@@ -191,7 +190,88 @@ func (m Model) Diff(ctx context.Context, from, to model.Root, r chunk.Reader) (m
 	return diffIter{d}, nil
 }
 
-// Merge implements model.Model.
+// Merge implements model.Model, per key: it zips the two sides' diffs from
+// base and applies to ours what only theirs changed; a key both changed is
+// clean when they agree and a conflict at that key when they do not.
 func (m Model) Merge(ctx context.Context, base, ours, theirs model.Root, rw chunk.ReadWriter) (model.MergeResult, error) {
-	return model.MergeResult{}, errNotImplemented
+	var maps [3]*prolly.Map
+	for i, r := range []model.Root{base, ours, theirs} {
+		var err error
+		if maps[i], err = open(ctx, rw, m.Config, r); err != nil {
+			return model.MergeResult{}, err
+		}
+	}
+	dOurs, err := prolly.Diff(ctx, maps[0], maps[1])
+	if err != nil {
+		return model.MergeResult{}, err
+	}
+	dTheirs, err := prolly.Diff(ctx, maps[0], maps[2])
+	if err != nil {
+		return model.MergeResult{}, err
+	}
+	ed := maps[1].Editor()
+	var conflicts []model.Conflict
+	co, okO, err := dOurs.Next()
+	if err != nil {
+		return model.MergeResult{}, err
+	}
+	ct, okT, err := dTheirs.Next()
+	if err != nil {
+		return model.MergeResult{}, err
+	}
+	for (okO || okT) && err == nil {
+		switch {
+		case !okT || (okO && bytes.Compare(co.Key, ct.Key) < 0): // only ours changed it
+			co, okO, err = dOurs.Next()
+		case !okO || bytes.Compare(ct.Key, co.Key) < 0: // only theirs changed it
+			if err = apply(ed, ct); err == nil {
+				ct, okT, err = dTheirs.Next()
+			}
+		default: // both changed it
+			if reason := disagreement(co, ct); reason != "" {
+				conflicts = append(conflicts, model.Conflict{Location: bytes.Clone(co.Key), Reason: reason})
+			}
+			if co, okO, err = dOurs.Next(); err == nil {
+				ct, okT, err = dTheirs.Next()
+			}
+		}
+	}
+	if err != nil {
+		return model.MergeResult{}, err
+	}
+	if len(conflicts) > 0 {
+		return model.MergeResult{Root: ours, Conflicts: conflicts}, nil
+	}
+	merged, err := ed.Flush(ctx)
+	if err != nil {
+		return model.MergeResult{}, err
+	}
+	return model.MergeResult{Root: rootOf(merged)}, nil
+}
+
+// apply makes theirs' change to a key in the merged object.
+func apply(ed *prolly.Editor, c prolly.Change) error {
+	if c.Kind == prolly.Removed {
+		return ed.Delete(c.Key)
+	}
+	if _, err := checked(c.Key, c.To); err != nil {
+		return err
+	}
+	return ed.Put(c.Key, c.To)
+}
+
+// disagreement is why both sides' changes to one key conflict, or "" if
+// they left it the same.
+func disagreement(ours, theirs prolly.Change) string {
+	switch {
+	case ours.Kind == prolly.Removed && theirs.Kind == prolly.Removed:
+		return ""
+	case ours.Kind == prolly.Removed || theirs.Kind == prolly.Removed:
+		return "deleted on one side and changed on the other"
+	case bytes.Equal(ours.To, theirs.To):
+		return ""
+	case ours.Kind == prolly.Added:
+		return "added with different values on both sides"
+	}
+	return "set to different values on both sides"
 }

@@ -1,10 +1,12 @@
 package kv_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk/memstore"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/model"
+	"github.com/SmithOperatingSolutions/snapshot-core/core/prolly"
 
 	"github.com/SmithOperatingSolutions/snapshot-engine/model/kv"
 )
@@ -96,4 +98,29 @@ func keysOf(m map[string]kv.Value) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// What theirs changed is checked before it lands in the merged object: a
+// side holding a frame that is not a value is refused, not copied.
+func TestMergeAppliesOnlyValuesOfOurs(t *testing.T) {
+	s := memstore.New()
+	m := kv.Model{Config: cfg()}
+	base := write(t, s, map[string]kv.Value{"a": bytesValue("1")})
+	ours := write(t, s, map[string]kv.Value{"a": bytesValue("1"), "b": bytesValue("2")})
+	// theirs, built by hand, sets c to a frame of no kind.
+	pm, err := prolly.Open(ctx, s, cfg(), base.Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := pm.Editor()
+	if err := e.Put([]byte("c"), []byte{0x7f, 'x'}); err != nil {
+		t.Fatal(err)
+	}
+	if pm, err = e.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	theirs := model.Root{Hash: pm.Root(), Size: 2, Format: kv.Format}
+	if _, err := m.Merge(ctx, base, ours, theirs, s); !errors.Is(err, kv.ErrValue) {
+		t.Fatalf("merging a side holding a frame of no kind: %v, want ErrValue", err)
+	}
 }

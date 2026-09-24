@@ -93,3 +93,38 @@ find: tm, err := open(ctx, readOnly{r}, m.Config, to)
 replace: tm, err := open(ctx, readOnly{r}, m.Config, model.Root{Hash: to.Hash, Size: to.Size, Format: Format})
 pkg: ./model/kv
 run: ^TestDiffIsOneChangePerKey$
+
+id: kv-merge-deleted-against-changed-conflicts
+file: model/kv/kv.go
+find: case ours.Kind == prolly.Removed || theirs.Kind == prolly.Removed:\n\t\treturn "deleted on one side and changed on the other"
+replace: case ours.Kind == prolly.Removed || theirs.Kind == prolly.Removed:\n\t\treturn ""
+pkg: ./model/kv
+run: ^TestMergeIsThreeWayPerKey$
+
+id: kv-merge-the-same-value-on-both-sides-is-clean
+file: model/kv/kv.go
+find: case bytes.Equal(ours.To, theirs.To):\n\t\treturn ""
+replace: case bytes.Equal(ours.To, theirs.To):\n\t\treturn "set to different values on both sides"
+pkg: ./model/kv
+run: ^TestMergeIsThreeWayPerKey$
+
+id: kv-merge-applies-what-only-theirs-changed
+file: model/kv/kv.go
+find: if err = apply(ed, ct); err == nil {\n\t\t\t\tct, okT, err = dTheirs.Next()\n\t\t\t}
+replace: ct, okT, err = dTheirs.Next()
+pkg: ./model/kv
+run: ^TestMergeIsThreeWayPerKey$
+
+id: kv-merge-a-conflict-keeps-ours
+file: model/kv/kv.go
+find: if len(conflicts) > 0 {\n\t\treturn model.MergeResult{Root: ours, Conflicts: conflicts}, nil\n\t}
+replace: if len(conflicts) > 0 {\n\t\treturn model.MergeResult{Root: ours}, nil\n\t}
+pkg: ./e2e
+run: ^TestBranchesSettingOneKeyToTwoValuesConflictOnThatKeyAlone$
+
+id: kv-merge-checks-what-it-applies
+file: model/kv/kv.go
+find: if _, err := checked(c.Key, c.To); err != nil {\n\t\treturn err\n\t}\n\treturn ed.Put(c.Key, c.To)
+replace: return ed.Put(c.Key, c.To)
+pkg: ./model/kv
+run: ^TestMergeAppliesOnlyValuesOfOurs$
