@@ -50,8 +50,45 @@ is a frame `kind u8 · payload`: kind 1 is Bytes, its payload at most 256 KiB
 the decoder copies the payload. Further kinds (counter, set, hash, sorted set,
 sequence) take further kind bytes (E3).
 
-Still to land: the table's root record, catalog and tuple encoding (E2), the
-document record (E5).
+**table, format 1** (`model/table`, id 3). Little-endian unless said. The
+object's root chunk is the *root record*: `"VDTR"` · version u16 (1) ·
+catalog (uvarint length ≤ 1 MiB, bytes) · primary map root [32] · row count
+u64 · index count uvarint (≤ 64) · per index: tag u16 · map root [32] ·
+entry count u64. The decoder refuses trailing bytes, a wrong magic or
+version, a catalog that does not validate, indexes that are not the
+catalog's in order, or an index whose count differs from the row count.
+`model.Root{Hash, Size: rows, Depth: 0, Format: 1}`.
+
+The *catalog*: `"VDTC"` · version u16 · column count uvarint (≤ 1024) · per
+column: tag u16 · name (uvarint ≤ 128, bytes) · type u8 · nullable u8 · max
+length u32 · primary key count uvarint · tags u16 · index count uvarint
+(≤ 64) · per index: tag u16 · column count uvarint · tags u16. Varints are
+minimal.
+
+The *primary map*: key = the key columns' cells concatenated (prefix-free),
+or the 16-byte row id of a keyless table; value = the non-key columns' cells
+in schema order. An *index map*: key = the index columns' cells then the
+encoded primary key; value empty.
+
+A *cell*: `0x00` is NULL; else `0x01` then the value: bool one byte;
+int2/4/8, date (i32 days), timestamp and timestamptz (i64 µs) big-endian
+with the sign bit flipped; float4/8 IEEE bits big-endian, sign flipped when
+positive and every bit when negative, −0 written as +0 and every NaN as the
+one NaN above everything, the decoder refusing any other spelling;
+text, varchar, bytea and jsonb as bytes with `0x00` escaped to `0x00 0xFF`
+and a `0x00 0x00` terminator (varchar's length in characters; text and
+jsonb UTF-8, jsonb non-empty); numeric as a sign class (`01` negative, `02`
+zero, `03` positive), then the adjusted exponent i32 big-endian sign-flipped
+and the digits as `0x01`..`0x0A` terminated by `0x00`, exponent and digits
+complemented with terminator `0xFF` for negatives, canonical text only;
+uuid 16 raw bytes. A cell is at most 1 MiB, a numeric at most 1000 digits.
+
+A *location* (diff and merge): the encoded key for a row; the encoded key
+then the column tag u16 big-endian for a cell; the literal `schema` for a
+schema conflict. Every model invents its own location encoding; this is
+table's.
+
+Still to land: the document record (E5).
 
 ## 4. Testing tiers
 

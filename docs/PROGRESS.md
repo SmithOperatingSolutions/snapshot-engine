@@ -13,7 +13,7 @@ collection, and the Engine Spec's L0 to L3 checklists and security rows.
 See [snapshot-core's PROGRESS](https://github.com/SmithOperatingSolutions/snapshot-core/blob/main/docs/PROGRESS.md).
 The engine takes the core by tag (`go.mod`) and never tracks its items here.
 
-**Updated 2026-09-24** · E1 done: the merge library; E0 done but for the first PR; table in progress
+**Updated 2026-09-24** · E1 done; E0 done but for the first PR; E2 done but for the two schema-merge items, which wait on wiring table to the merge library
 
 ## Milestones
 
@@ -21,7 +21,7 @@ The engine takes the core by tag (`go.mod`) and never tracks its items here.
 | --- | --- | --- | --- |
 | **E0 Foundations** | 🚧 (one item waits for the first PR) | The module on snapshot-core v0.1.0; the gates (fmt, vet, lint with the layer table, vuln, race, coverage, redcheck, mutants); `model/kv` at the bytes kind, passing the core's `model/contract` from outside the core, end to end through a repository; 23 mutants, 91% covered | A deliberately failing `test:` commit blocks a PR (first PR); a kv object round-trips through a repository and two branches setting different keys merge clean ✅ |
 | **E1 Merge library** | ✅ Done | `merge/`: `Scalar`, `Counter`, `Set` (observed-remove over write tags), `Sequence` (diff3 over element keys), `Tree` (a JSON-like `Node` merged by path, arrays as sequences, counter paths by option); conflicts as values with a path and a reason, never repaired; 97% covered, 11 mutants | Every policy has a property test: deterministic, one-sided change returns that side, symmetric (`TestScalarAndCounterProperties`, `TestSetProperties`, `TestSequenceProperties`, `TestTreeProperties`) |
-| **E2 Tables** | | `model/table`: catalog with tagged columns, order-preserving tuple encoding, primary and secondary indexes, diff per row then cell, merge schema first | Every E2 item below green |
+| **E2 Tables** | 🚧 (two items wait on the merge library) | `model/table`: catalog with tagged columns, order-preserving cell encoding for every v1 type, primary and index maps, a hidden row id, the row API, diff per row then cell, merge per row and cell with one schema; three decoders, three fuzz targets; 24 mutants, 91% covered | Every E2 item below green |
 | **E3 Key-value** | | `model/kv` whole: bytes, counter, set, hash, sorted set, sequence, each with its policy | Every E3 item below green |
 | **E4 Engine API** | | `engine/`: `Database`, `Session`, `Txn`; snapshot isolation; optimistic commit through the models' merge; authorization on every call; commit, branch, merge, diff, log | Every E4 item below green; `e2e/` drives a repository through `engine/` alone |
 | **E5 Documents** | | `model/document`: records by id, field-path diff and merge, a bounded parser for JSON input | Every E5 item below green |
@@ -50,17 +50,17 @@ with their own progress; they import `engine/` alone.
 - [x] **Property:** every policy is symmetric in ours and theirs, and documented so; conflict reasons are worded side-neutral so symmetry holds (the same tests).
 
 ### E2 Tables (`model/table`; the Engine Spec's L4 storage layout and encoding)
-- [ ] **Property:** for random values of each v1 type, `decode(encode(v)) == v`.
-- [ ] **Property:** for random pairs, `bytes.Compare(enc(a), enc(b))` matches the type's SQL comparison, NULLs first.
-- [ ] Insert, update, delete, and point lookup by primary key.
-- [ ] A table without a declared primary key gets a hidden 16-byte row id; two inserts of equal rows are two rows.
-- [ ] Secondary index returns the same rows as a full scan with a filter; an index is updated with its primary map, never apart from it.
-- [ ] Writing a 300-char string into `varchar(255)` is rejected; nothing is written. Every value is validated against its column type; invalid input is refused, never coerced.
-- [ ] The catalog is a versioned record with a stable numeric tag per column; a forged or truncated catalog is refused (fuzz target).
-- [ ] Rename a column on branch A, update a row on branch B, merge: data survives under the new name.
-- [ ] Two branches change the same cell differently: a conflict on that cell alone; the rest of the table merges.
-- [ ] Two branches change the schema incompatibly (drop a column and write to it): a schema conflict, no rows lost.
-- [ ] `model/contract` green.
+- [x] **Property:** for random values of each v1 type, `decode(encode(v)) == v` (`TestEveryTypeRoundTrips`; the layouts by hand, `TestCellsAreTheDocumentedEncodings`; forgeries, `TestForgedCellsAreRefused`, `FuzzDecodeCell`).
+- [x] **Property:** for random pairs, `bytes.Compare(enc(a), enc(b))` matches the type's SQL comparison, NULLs first (`TestByteOrderIsTheTypesOrder`).
+- [x] Insert, update, delete, and point lookup by primary key (`TestRowsRoundTripByPrimaryKey`).
+- [x] A table without a declared primary key gets a hidden 16-byte row id; two inserts of equal rows are two rows (`TestATableWithoutAKeyGetsHiddenRowIDs`).
+- [x] Secondary index returns the same rows as a full scan with a filter; an index is updated with its primary map, never apart from it (`TestAnIndexReturnsWhatAScanWithAFilterReturns`; an index that drifted is refused, `TestAnIndexThatDriftedFromTheRowsIsRefused`).
+- [x] Writing a 300-char string into `varchar(255)` is rejected; nothing is written. Every value is validated against its column type; invalid input is refused, never coerced (`TestWritesThatDoNotFitAreRefusedAndWriteNothing`, `TestValuesThatDoNotFitAreRefused`).
+- [x] The catalog is a versioned record with a stable numeric tag per column; a forged or truncated catalog is refused (`TestTheCatalogIsTheDocumentedRecord`, `TestSchemasThatCannotBeATablesAreRefused`, `TestForgedCatalogsAreRefused`, `FuzzDecodeCatalog`); so is the root record (`TestTheRootIsTheDocumentedRecord`, `FuzzDecodeRoot`).
+- [ ] Rename a column on branch A, update a row on branch B, merge: data survives under the new name (waits on the merge library and the schema-merge rules).
+- [x] Two branches change the same cell differently: a conflict on that cell alone; the rest of the table merges (`TestMergeCombinesRowsAndCells`; diff per row then cell, `TestDiffIsPerRowThenPerCell`, `TestByteCellsDiffByContent`).
+- [ ] Two branches change the schema incompatibly (drop a column and write to it): a schema conflict, no rows lost (this slice: two different schemas are one conflict at `schema`, `TestTablesOfDifferentSchemasAreOneConflict`).
+- [x] `model/contract` green (`TestContract`); the walk reaches a long cell's stream (`TestWalkNamesALongCellsChunks`); store faults surface everywhere (`TestStoreFaultsAreReported`).
 
 ### E3 Key-value (`model/kv`)
 - [ ] Every value kind round-trips through its decoder; every decoder has a fuzz target.
@@ -108,3 +108,6 @@ with their own progress; they import `engine/` alone.
 | the first plugin outside the core (kv) | The core's `model/contract` checks the merge identities (merge(b, o, o) = o and the like) and never exercises a conflict, so conflict semantics rest on each model's own tests | To ask of the core: a conflict case in the contract, with the model's `Subject` saying how to make two changes that collide |
 | the layer rule for models | depguard's `**/model/**` rule catches `_test.go` files too, so a model's end-to-end test through a repository cannot live beside the model | Such tests live in the root-level `e2e/` package (DESIGN §2) |
 | the module's first tidy | `go mod tidy` needed `GOPROXY=direct GONOSUMDB=github.com/SmithOperatingSolutions` to fetch the core's transitive sums | Check CI's setup-go with the default proxy on the first push |
+| the cell decoder's fuzzer (table) | A `-0` and an alternative NaN bit pattern decoded and re-encoded differently, so a cell had two spellings | The decoder refuses a float that is not the canonical spelling; the input is a checked-in seed under `model/table/testdata/fuzz` |
+| the second plugin outside the core (table) | `core/internal/wire` is internal, so table carries its own hundred-line bounded reader and writer; `prolly.Open` takes a ReadWriter, so a model reading over a Reader needs an adapter; `model.Change` and `Conflict` carry a `Location []byte` only, so a cell's address is a private encoding (key then column tag) every model invents | To ask of the core: a public bounded wire package, and `mapobject.ReadOnly` for the adapter (in the core's next tag); the location convention is recorded in DESIGN §3 |
+| redcheck, on a rename | A `test:` commit whose rename touched an existing test file was blocked: redcheck judges every test the commit changed, and those passed without the change | Renames go in a `refactor:` commit of their own; CONTRIBUTING says so |

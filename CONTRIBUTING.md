@@ -60,6 +60,11 @@ needs a `test:` commit since the previous one, of the same scope. A change to
 a port's contract suite (`<pkg>/contract`) counts as a change to every Test
 function that calls it.
 
+**Renames are not reds.** redcheck judges every test a `test:` commit
+changed, so a rename that touches an existing test file blocks the commit:
+those tests pass without the change. A rename goes in a `refactor:` commit
+of its own, before the red.
+
 **Backfills.** A test for behavior that already exists cannot fail against
 its parent. Its red is a mutant instead: add the mutant to
 `tools/mutate/mutants.txt` in the same commit and name it in the body
