@@ -22,12 +22,12 @@ func members(pairs ...any) merge.Members[string] {
 // under a new tag stays (observed remove).
 func TestSetsKeepAdditionsDropRemovalsAndKeepReAdds(t *testing.T) {
 	base := members("a", 1, "b", 2, "c", 3)
-	ours := members("a", 1, "c", 3, "d", 4)           // removed b, added d
-	theirs := members("a", 1, "b", 2, "c", 3, "e", 5) // added e
+	ours := members("a", 1, "c", 3, "d", 4)   // removed b, added d
+	theirs := members("a", 1, "b", 2, "e", 5) // removed c, added e
 	got := merge.Set(base, ours, theirs)
-	for elem, want := range map[string]bool{"a": true, "b": false, "c": true, "d": true, "e": true} {
+	for elem, want := range map[string]bool{"a": true, "b": false, "c": false, "d": true, "e": true} {
 		if got.Has(elem) != want {
-			t.Errorf("after ours removed b and added d, theirs added e: %q present = %t, want %t", elem, got.Has(elem), want)
+			t.Errorf("after ours removed b and added d, theirs removed c and added e: %q present = %t, want %t", elem, got.Has(elem), want)
 		}
 	}
 	readd := merge.Set(members("x", 1), members(), members("x", 1, "x", 9))

@@ -7,3 +7,75 @@
 #   replace: <text>
 #   pkg: ./<package>
 #   run: ^TestName$
+
+# merge
+
+id: merge-scalar-conflicts-on-two-changes
+file: merge/merge.go
+find: return Result[T]{Value: base, Conflicts: []Conflict{{Reason: "both sides changed it, to different values"}}}
+replace: return Result[T]{Value: ours}
+pkg: ./merge
+run: ^TestScalarsMergeByWhoChanged$
+
+id: merge-counter-adds-both-deltas
+file: merge/merge.go
+find: return base + (ours - base) + (theirs - base)
+replace: return ours
+pkg: ./merge
+run: ^TestCountersAddTheirDeltas$
+
+id: merge-set-drops-what-one-side-removed
+file: merge/set.go
+find: if theirs[t] || !base[t] { // kept by both, or added here
+replace: if theirs[t] || !base[t] || true {
+pkg: ./merge
+run: ^TestSetsKeepAdditionsDropRemovalsAndKeepReAdds$
+
+id: merge-set-keeps-what-the-other-added
+file: merge/set.go
+find: if !base[t] { // added there
+replace: if !base[t] && false {
+pkg: ./merge
+run: ^TestSetsKeepAdditionsDropRemovalsAndKeepReAdds$
+
+id: merge-sequence-flags-a-double-insert
+file: merge/sequence.go
+find: r.Flagged = append(r.Flagged, Conflict{Path: at, Reason: "both sides inserted here; kept both, in key order"})
+replace: _ = at
+pkg: ./merge
+run: ^TestSequencesMergeByIdentityAndPosition$
+
+id: merge-sequence-conflicts-on-two-changes
+file: merge/sequence.go
+find: r.Conflicts = append(r.Conflicts, Conflict{Path: at, Reason: "both sides changed this stretch, differently"})
+replace: _ = at
+pkg: ./merge
+run: ^TestSequencesMergeByIdentityAndPosition$
+
+id: merge-sequence-orders-blocks-by-key
+file: merge/sequence.go
+find: if lessKeys(ko, kt) {
+replace: if true {
+pkg: ./merge
+run: ^TestSequencesMergeByIdentityAndPosition$
+
+id: merge-tree-deleted-against-changed
+file: merge/tree.go
+find: r.Conflicts = append(r.Conflicts, Conflict{Path: path, Reason: "deleted on one side and changed on the other"})
+replace: _ = path
+pkg: ./merge
+run: ^TestTreesMergeByPath$
+
+id: merge-tree-counter-adds-deltas
+file: merge/tree.go
+find: return Num(strconv.FormatInt(Counter(base, ours, theirs), 10)), true
+replace: return Num(strconv.FormatInt(base+(ours-base)+(theirs-theirs), 10)), true
+pkg: ./merge
+run: ^TestTreesMergeByPath$
+
+id: merge-tree-arrays-as-sequences
+file: merge/tree.go
+find: case b != nil && o.Kind == Array && t.Kind == Array && b.Kind == Array:
+replace: case false:
+pkg: ./merge
+run: ^TestTreesMergeByPath$
