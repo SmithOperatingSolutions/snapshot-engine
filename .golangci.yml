@@ -73,9 +73,10 @@ linters:
             - pkg: github.com/SmithOperatingSolutions/snapshot-core/core/object
               desc: "a model is one object; namespaces are above it"
         a-program-sees-the-engine-alone:
-          # e2e/engine_*_test.go is a program as an adapter is one (DESIGN D6):
-          # it reaches the database through engine/ and nothing else.
-          files: ["**/e2e/engine_*test.go"]
+          # e2e/engine_*_test.go and tools/bench are programs as an adapter is
+          # one (DESIGN D6): they reach the database through engine/ and
+          # nothing else.
+          files: ["**/e2e/engine_*test.go", "**/tools/bench/**"]
           deny:
             - pkg: github.com/SmithOperatingSolutions/snapshot-core
               desc: "a program imports engine alone; what it needs of the core is re-exported there"
