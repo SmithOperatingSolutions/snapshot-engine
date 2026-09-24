@@ -770,3 +770,10 @@ find: if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, contex
 replace: if err == nil {
 pkg: ./engine
 run: ^TestErrorsToCallersAreScrubbed$
+
+id: engine-scrub-is-idempotent
+file: engine/errors.go
+find: if errors.As(err, &e) && err == error(e) { // scrubbed already
+replace: if errors.As(err, &e) && false { // scrubbed already
+pkg: ./engine
+run: ^TestAScrubbedErrorIsNotScrubbedAgain$

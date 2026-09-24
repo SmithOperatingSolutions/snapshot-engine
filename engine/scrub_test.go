@@ -76,3 +76,18 @@ func TestErrorsToCallersAreScrubbed(t *testing.T) {
 		t.Errorf("with no logger the error is %q, want the engine error alone", got)
 	}
 }
+
+// An error scrubbed twice, as happens when one exported call returns
+// another's error, keeps its first correlation id and is logged once.
+func TestAScrubbedErrorIsNotScrubbedAgain(t *testing.T) {
+	log := &scrubLog{}
+	once := engine.Scrub(ctx, log, fmt.Errorf("%w: details", engine.ErrNotFound))
+	twice := engine.Scrub(ctx, log, once)
+	var a, b *engine.Error
+	if !errors.As(once, &a) || !errors.As(twice, &b) || a.Correlation != b.Correlation {
+		t.Errorf("scrubbing a scrubbed error changed its correlation id: %v, then %v", once, twice)
+	}
+	if len(log.entries) != 1 {
+		t.Errorf("a doubly scrubbed error was logged %d times, want once", len(log.entries))
+	}
+}
