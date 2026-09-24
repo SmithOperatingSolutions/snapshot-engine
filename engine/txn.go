@@ -6,9 +6,12 @@ import (
 	"fmt"
 
 	"github.com/SmithOperatingSolutions/snapshot-core/core/merge"
+	"github.com/SmithOperatingSolutions/snapshot-core/core/model"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/object"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/vcs"
 
+	"github.com/SmithOperatingSolutions/snapshot-engine/model/document"
+	"github.com/SmithOperatingSolutions/snapshot-engine/model/kv"
 	"github.com/SmithOperatingSolutions/snapshot-engine/model/table"
 )
 
@@ -30,8 +33,16 @@ type Txn struct {
 // txnObject is an object the transaction touched: opened, created or
 // dropped.
 type txnObject struct {
-	table   *Table // the open handle; nil when dropped
+	h       handle // the open handle; nil when dropped
 	dropped bool
+}
+
+// handle is an object open in a transaction: a table, a key-value map or a
+// document collection.
+type handle interface {
+	ref() object.Ref                 // the object as it stands, its pending writes aside
+	flush(ctx context.Context) error // write the pending writes, so reads see them
+	drop()                           // the object was dropped: refuse every call after
 }
 
 // maxCommitAttempts is how many times Commit re-reads, merges and swaps
@@ -71,7 +82,7 @@ func (t *Txn) lookup(ctx context.Context, name string) (object.Ref, bool, error)
 		if o.dropped {
 			return object.Ref{}, false, nil
 		}
-		return object.Ref{Model: table.ID, Root: o.table.t.Root()}, true, nil
+		return o.h.ref(), true, nil
 	}
 	ref, _, ok, err := t.base.Get(ctx, name)
 	if err != nil {
@@ -80,25 +91,63 @@ func (t *Txn) lookup(ctx context.Context, name string) (object.Ref, bool, error)
 	return ref, ok, nil
 }
 
-// CreateTable makes a table named name.
-func (t *Txn) CreateTable(ctx context.Context, name string, s Schema) (*Table, error) {
+// creatable refuses a name an object cannot be made under: one that is not
+// an object path (ErrInvalid) or is taken (ErrExists).
+func (t *Txn) creatable(ctx context.Context, name string) error {
 	if err := t.check(); err != nil {
-		return nil, err
+		return err
 	}
 	if err := object.ValidPath(name); err != nil {
-		return nil, fmt.Errorf("%w (%w)", ErrInvalid, err)
+		return fmt.Errorf("%w (%w)", ErrInvalid, err)
 	}
 	if _, ok, err := t.lookup(ctx, name); err != nil {
-		return nil, err
+		return err
 	} else if ok {
-		return nil, ErrExists
+		return ErrExists
+	}
+	return nil
+}
+
+// opened is the handle this transaction already holds for name, if any; a
+// name dropped in this transaction is ErrNotFound.
+func (t *Txn) opened(name string) (handle, bool, error) {
+	o, ok := t.objs[name]
+	if !ok {
+		return nil, false, nil
+	}
+	if o.dropped {
+		return nil, false, ErrNotFound
+	}
+	return o.h, true, nil
+}
+
+// stored is the object named name as the transaction began on it, which
+// must be of model id.
+func (t *Txn) stored(ctx context.Context, name string, id model.ID) (object.Ref, error) {
+	ref, ok, err := t.lookup(ctx, name)
+	if err != nil {
+		return object.Ref{}, err
+	}
+	if !ok {
+		return object.Ref{}, ErrNotFound
+	}
+	if ref.Model != id {
+		return object.Ref{}, ErrWrongKind
+	}
+	return ref, nil
+}
+
+// CreateTable makes a table named name.
+func (t *Txn) CreateTable(ctx context.Context, name string, s Schema) (*Table, error) {
+	if err := t.creatable(ctx, name); err != nil {
+		return nil, err
 	}
 	tb, err := table.Create(ctx, t.s.db.r.Chunks(), t.s.db.models.table.Config, s)
 	if err != nil {
 		return nil, tableErr(err)
 	}
 	h := &Table{tx: t, t: tb}
-	t.objs[name] = &txnObject{table: h}
+	t.objs[name] = &txnObject{h: h}
 	return h, nil
 }
 
@@ -107,47 +156,108 @@ func (t *Txn) Table(ctx context.Context, name string) (*Table, error) {
 	if err := t.check(); err != nil {
 		return nil, err
 	}
-	if o, ok := t.objs[name]; ok {
-		if o.dropped {
-			return nil, ErrNotFound
+	if h, ok, err := t.opened(name); err != nil {
+		return nil, err
+	} else if ok {
+		tb, ok := h.(*Table)
+		if !ok {
+			return nil, ErrWrongKind
 		}
-		return o.table, nil
+		return tb, nil
 	}
-	ref, ok, err := t.lookup(ctx, name)
+	ref, err := t.stored(ctx, name, table.ID)
 	if err != nil {
 		return nil, err
-	}
-	if !ok {
-		return nil, ErrNotFound
-	}
-	if ref.Model != table.ID {
-		return nil, ErrWrongKind
 	}
 	tb, err := table.Open(ctx, t.s.db.r.Chunks(), t.s.db.models.table.Config, ref.Root)
 	if err != nil {
 		return nil, translate(err)
 	}
 	h := &Table{tx: t, t: tb}
-	t.objs[name] = &txnObject{table: h}
+	t.objs[name] = &txnObject{h: h}
 	return h, nil
 }
 
-// CreateKV makes a key-value map named name. (Stub.)
+// CreateKV makes a key-value map named name.
 func (t *Txn) CreateKV(ctx context.Context, name string) (*KV, error) {
-	return nil, errNotImplemented
+	if err := t.creatable(ctx, name); err != nil {
+		return nil, err
+	}
+	m, err := kv.Empty(ctx, t.s.db.r.Chunks(), t.s.db.models.kv.Config)
+	if err != nil {
+		return nil, translate(err)
+	}
+	h := &KV{tx: t, m: m}
+	t.objs[name] = &txnObject{h: h}
+	return h, nil
 }
 
-// KV opens the key-value map named name. (Stub.)
-func (t *Txn) KV(ctx context.Context, name string) (*KV, error) { return nil, errNotImplemented }
+// KV opens the key-value map named name.
+func (t *Txn) KV(ctx context.Context, name string) (*KV, error) {
+	if err := t.check(); err != nil {
+		return nil, err
+	}
+	if h, ok, err := t.opened(name); err != nil {
+		return nil, err
+	} else if ok {
+		m, ok := h.(*KV)
+		if !ok {
+			return nil, ErrWrongKind
+		}
+		return m, nil
+	}
+	ref, err := t.stored(ctx, name, kv.ID)
+	if err != nil {
+		return nil, err
+	}
+	m, err := kv.Open(ctx, t.s.db.r.Chunks(), t.s.db.models.kv.Config, ref.Root)
+	if err != nil {
+		return nil, kvErr(err)
+	}
+	h := &KV{tx: t, m: m}
+	t.objs[name] = &txnObject{h: h}
+	return h, nil
+}
 
-// CreateCollection makes a document collection named name. (Stub.)
+// CreateCollection makes a document collection named name.
 func (t *Txn) CreateCollection(ctx context.Context, name string) (*Collection, error) {
-	return nil, errNotImplemented
+	if err := t.creatable(ctx, name); err != nil {
+		return nil, err
+	}
+	c, err := document.Empty(ctx, t.s.db.r.Chunks(), t.s.db.models.document.Config)
+	if err != nil {
+		return nil, translate(err)
+	}
+	h := &Collection{tx: t, c: c}
+	t.objs[name] = &txnObject{h: h}
+	return h, nil
 }
 
-// Collection opens the document collection named name. (Stub.)
+// Collection opens the document collection named name.
 func (t *Txn) Collection(ctx context.Context, name string) (*Collection, error) {
-	return nil, errNotImplemented
+	if err := t.check(); err != nil {
+		return nil, err
+	}
+	if h, ok, err := t.opened(name); err != nil {
+		return nil, err
+	} else if ok {
+		c, ok := h.(*Collection)
+		if !ok {
+			return nil, ErrWrongKind
+		}
+		return c, nil
+	}
+	ref, err := t.stored(ctx, name, document.ID)
+	if err != nil {
+		return nil, err
+	}
+	c, err := document.Open(ctx, t.s.db.r.Chunks(), t.s.db.models.document.Config, ref.Root)
+	if err != nil {
+		return nil, docErr(err)
+	}
+	h := &Collection{tx: t, c: c}
+	t.objs[name] = &txnObject{h: h}
+	return h, nil
 }
 
 // Drop removes the object named name, of whatever kind; a handle to it
@@ -161,8 +271,8 @@ func (t *Txn) Drop(ctx context.Context, name string) error {
 	} else if !ok {
 		return ErrNotFound
 	}
-	if o, ok := t.objs[name]; ok && o.table != nil {
-		o.table.gone = true
+	if o, ok := t.objs[name]; ok && o.h != nil {
+		o.h.drop()
 	}
 	t.objs[name] = &txnObject{dropped: true}
 	return nil
@@ -183,10 +293,10 @@ func (t *Txn) namespace(ctx context.Context) (*object.Namespace, error) {
 			}
 			continue
 		}
-		if err := o.table.flush(ctx); err != nil {
+		if err := o.h.flush(ctx); err != nil {
 			return nil, err
 		}
-		if err := e.Put(name, object.Ref{Model: table.ID, Root: o.table.t.Root()}); err != nil {
+		if err := e.Put(name, o.h.ref()); err != nil {
 			return nil, err
 		}
 	}
@@ -268,6 +378,10 @@ type Table struct {
 	ed   *table.Editor // writes not yet flushed; nil when none
 	gone bool          // dropped in this transaction
 }
+
+func (h *Table) ref() object.Ref { return object.Ref{Model: table.ID, Root: h.t.Root()} }
+
+func (h *Table) drop() { h.gone = true }
 
 // check refuses a call on a finished transaction or a dropped table.
 func (h *Table) check() error {
@@ -430,48 +544,244 @@ func tableErr(err error) error {
 	return fmt.Errorf("%w (%w)", to, err)
 }
 
-// KV is a key-value map inside a transaction.
-type KV struct{}
+// KV is a key-value map inside a transaction; reads see the transaction's
+// writes.
+type KV struct {
+	tx   *Txn
+	m    *kv.Map
+	ed   *kv.MapEditor // writes not yet flushed; nil when none
+	gone bool          // dropped in this transaction
+}
 
-// Get reads key. (Stub.)
+func (m *KV) ref() object.Ref { return object.Ref{Model: kv.ID, Root: m.m.Root()} }
+
+func (m *KV) drop() { m.gone = true }
+
+// check refuses a call on a finished transaction or a dropped map.
+func (m *KV) check() error {
+	if err := m.tx.check(); err != nil {
+		return err
+	}
+	if m.gone {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// flush writes the pending writes, so reads see them.
+func (m *KV) flush(ctx context.Context) error {
+	if m.ed == nil {
+		return nil
+	}
+	next, err := m.ed.Flush(ctx)
+	if err != nil {
+		return kvErr(err)
+	}
+	m.m, m.ed = next, nil
+	return nil
+}
+
+// editor is the pending writes, begun on the first.
+func (m *KV) editor() *kv.MapEditor {
+	if m.ed == nil {
+		m.ed = m.m.Edit()
+	}
+	return m.ed
+}
+
+// Get reads key.
 func (m *KV) Get(ctx context.Context, key []byte) (Value, bool, error) {
-	return Value{}, false, errNotImplemented
+	if err := m.check(); err != nil {
+		return Value{}, false, err
+	}
+	if err := m.flush(ctx); err != nil {
+		return Value{}, false, err
+	}
+	v, ok, err := m.m.Get(ctx, key)
+	if err != nil {
+		return Value{}, false, kvErr(err)
+	}
+	return v, ok, nil
 }
 
-// Set writes key. (Stub.)
-func (m *KV) Set(ctx context.Context, key []byte, v Value) error { return errNotImplemented }
+// Set writes key; a key or value the kv model refuses is ErrInvalid and
+// writes nothing.
+func (m *KV) Set(ctx context.Context, key []byte, v Value) error {
+	if err := m.check(); err != nil {
+		return err
+	}
+	return kvErr(m.editor().Set(key, v))
+}
 
-// Delete removes key. (Stub.)
-func (m *KV) Delete(ctx context.Context, key []byte) error { return errNotImplemented }
+// Delete removes key. A key that is not there is a no-op, as in the kv
+// model (Redis's DEL); a table's Delete of a missing row is ErrNotFound.
+func (m *KV) Delete(ctx context.Context, key []byte) error {
+	if err := m.check(); err != nil {
+		return err
+	}
+	return kvErr(m.editor().Delete(key))
+}
 
-// Scan calls each for every key at or after from in key order until it
-// returns false or an error. (Stub.)
+// Scan calls each for every key at or after from (nil: the first) in key
+// order until it returns false or an error.
 func (m *KV) Scan(ctx context.Context, from []byte, each func([]byte, Value) (bool, error)) error {
-	return errNotImplemented
+	if err := m.check(); err != nil {
+		return err
+	}
+	if err := m.flush(ctx); err != nil {
+		return err
+	}
+	es, err := m.m.Scan(ctx, from)
+	if err != nil {
+		return kvErr(err)
+	}
+	for {
+		k, v, ok, err := es.Next()
+		if err != nil {
+			return kvErr(err)
+		}
+		if !ok {
+			return nil
+		}
+		if more, err := each(k, v); err != nil || !more {
+			return err
+		}
+	}
 }
 
-// Collection is a document collection inside a transaction.
-type Collection struct{}
+// kvErr is the engine error for the kv model's.
+func kvErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, kv.ErrKey), errors.Is(err, kv.ErrValue):
+		return fmt.Errorf("%w (%w)", ErrInvalid, err)
+	}
+	return translate(err)
+}
 
-// Get reads the record with id. (Stub.)
+// Collection is a document collection inside a transaction; reads see the
+// transaction's writes.
+type Collection struct {
+	tx   *Txn
+	c    *document.Collection
+	ed   *document.CollectionEditor // writes not yet flushed; nil when none
+	gone bool                       // dropped in this transaction
+}
+
+func (c *Collection) ref() object.Ref { return object.Ref{Model: document.ID, Root: c.c.Root()} }
+
+func (c *Collection) drop() { c.gone = true }
+
+// check refuses a call on a finished transaction or a dropped collection.
+func (c *Collection) check() error {
+	if err := c.tx.check(); err != nil {
+		return err
+	}
+	if c.gone {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// flush writes the pending writes, so reads see them.
+func (c *Collection) flush(ctx context.Context) error {
+	if c.ed == nil {
+		return nil
+	}
+	next, err := c.ed.Flush(ctx)
+	if err != nil {
+		return docErr(err)
+	}
+	c.c, c.ed = next, nil
+	return nil
+}
+
+// editor is the pending writes, begun on the first.
+func (c *Collection) editor() *document.CollectionEditor {
+	if c.ed == nil {
+		c.ed = c.c.Edit()
+	}
+	return c.ed
+}
+
+// Get reads the record with id.
 func (c *Collection) Get(ctx context.Context, id []byte) (Node, bool, error) {
-	return Node{}, false, errNotImplemented
+	if err := c.check(); err != nil {
+		return Node{}, false, err
+	}
+	if err := c.flush(ctx); err != nil {
+		return Node{}, false, err
+	}
+	n, ok, err := c.c.Get(ctx, id)
+	if err != nil {
+		return Node{}, false, docErr(err)
+	}
+	return n, ok, nil
 }
 
-// Put writes the record with id. (Stub.)
-func (c *Collection) Put(ctx context.Context, id []byte, doc Node) error { return errNotImplemented }
+// Put writes the record with id; an id or document the model refuses is
+// ErrInvalid and writes nothing.
+func (c *Collection) Put(ctx context.Context, id []byte, doc Node) error {
+	if err := c.check(); err != nil {
+		return err
+	}
+	return docErr(c.editor().Put(id, doc))
+}
 
 // PutJSON parses text with the document model's bounded parser and writes
-// it. (Stub.)
+// it; malformed or oversized text is ErrInvalid and writes nothing.
 func (c *Collection) PutJSON(ctx context.Context, id []byte, text []byte) error {
-	return errNotImplemented
+	if err := c.check(); err != nil {
+		return err
+	}
+	return docErr(c.editor().PutJSON(id, text))
 }
 
-// Delete removes the record with id. (Stub.)
-func (c *Collection) Delete(ctx context.Context, id []byte) error { return errNotImplemented }
+// Delete removes the record with id. A record that is not there is a
+// no-op, as in the document model (Mongo's deleteOne); a table's Delete of
+// a missing row is ErrNotFound.
+func (c *Collection) Delete(ctx context.Context, id []byte) error {
+	if err := c.check(); err != nil {
+		return err
+	}
+	return docErr(c.editor().Delete(id))
+}
 
-// Scan calls each for every record at or after from in id order until it
-// returns false or an error. (Stub.)
+// Scan calls each for every record at or after from (nil: the first) in id
+// order until it returns false or an error.
 func (c *Collection) Scan(ctx context.Context, from []byte, each func([]byte, Node) (bool, error)) error {
-	return errNotImplemented
+	if err := c.check(); err != nil {
+		return err
+	}
+	if err := c.flush(ctx); err != nil {
+		return err
+	}
+	rs, err := c.c.Scan(ctx, from)
+	if err != nil {
+		return docErr(err)
+	}
+	for {
+		id, n, ok, err := rs.Next()
+		if err != nil {
+			return docErr(err)
+		}
+		if !ok {
+			return nil
+		}
+		if more, err := each(id, n); err != nil || !more {
+			return err
+		}
+	}
+}
+
+// docErr is the engine error for the document model's.
+func docErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, document.ErrID), errors.Is(err, document.ErrDocument):
+		return fmt.Errorf("%w (%w)", ErrInvalid, err)
+	}
+	return translate(err)
 }

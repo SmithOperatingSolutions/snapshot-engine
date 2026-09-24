@@ -918,36 +918,36 @@ run: ^TestObjectsByName$
 
 id: engine-txn-a-name-must-be-a-path
 file: engine/txn.go
-find: \tif err := object.ValidPath(name); err != nil {\n\t\treturn nil, fmt.Errorf("%w (%w)", ErrInvalid, err)
-replace: \tif err := object.ValidPath(name); err != nil && false {\n\t\treturn nil, fmt.Errorf("%w (%w)", ErrInvalid, err)
+find: \tif err := object.ValidPath(name); err != nil {\n\t\treturn fmt.Errorf("%w (%w)", ErrInvalid, err)
+replace: \tif err := object.ValidPath(name); err != nil && false {\n\t\treturn fmt.Errorf("%w (%w)", ErrInvalid, err)
 pkg: ./engine
 run: ^TestObjectsByName$
 
 id: engine-txn-a-name-taken-is-refused
 file: engine/txn.go
-find: \t} else if ok {\n\t\treturn nil, ErrExists
-replace: \t} else if ok && false {\n\t\treturn nil, ErrExists
+find: \t} else if ok {\n\t\treturn ErrExists
+replace: \t} else if ok && false {\n\t\treturn ErrExists
 pkg: ./engine
 run: ^TestObjectsByName$
 
 id: engine-txn-another-model-is-the-wrong-kind
 file: engine/txn.go
-find: \tif ref.Model != table.ID {\n\t\treturn nil, ErrWrongKind
-replace: \tif false {\n\t\treturn nil, ErrWrongKind
+find: \tif ref.Model != id {\n\t\treturn object.Ref{}, ErrWrongKind
+replace: \tif false {\n\t\treturn object.Ref{}, ErrWrongKind
 pkg: ./engine
 run: ^TestObjectsByName$
 
 id: engine-txn-drop-needs-the-object
 file: engine/txn.go
-find: \t} else if !ok {\n\t\treturn ErrNotFound\n\t}\n\tif o, ok := t.objs[name]; ok && o.table != nil {
-replace: \t} else if !ok && false {\n\t\treturn ErrNotFound\n\t}\n\tif o, ok := t.objs[name]; ok && o.table != nil {
+find: \t} else if !ok {\n\t\treturn ErrNotFound\n\t}\n\tif o, ok := t.objs[name]; ok && o.h != nil {
+replace: \t} else if !ok && false {\n\t\treturn ErrNotFound\n\t}\n\tif o, ok := t.objs[name]; ok && o.h != nil {
 pkg: ./engine
 run: ^TestObjectsByName$
 
 id: engine-txn-a-dropped-tables-handle-refuses
 file: engine/txn.go
-find: \t\to.table.gone = true
-replace: \t\t_ = o.table
+find: func (h *Table) drop() { h.gone = true }
+replace: func (h *Table) drop() {}
 pkg: ./engine
 run: ^TestObjectsByName$
 
@@ -960,7 +960,7 @@ run: ^TestObjectsByName$
 
 id: engine-txn-commit-flushes-every-handle
 file: engine/txn.go
-find: \t\tif err := o.table.flush(ctx); err != nil {\n\t\t\treturn nil, err\n\t\t}
+find: \t\tif err := o.h.flush(ctx); err != nil {\n\t\t\treturn nil, err\n\t\t}
 replace: \t\tif err := error(nil); err != nil {\n\t\t\treturn nil, err\n\t\t}
 pkg: ./engine
 run: ^TestTwoTransactionsOnDifferentRowsBothCommit$
@@ -1051,8 +1051,8 @@ run: ^TestATransactionReadsItsSnapshotAndItsOwnWrites$
 
 id: engine-txn-an-open-table-is-one-handle
 file: engine/txn.go
-find: \t\tif o.dropped {\n\t\t\treturn nil, ErrNotFound\n\t\t}\n\t\treturn o.table, nil
-replace: \t\tif o.dropped {\n\t\t\treturn nil, ErrNotFound\n\t\t}\n\t\t_ = o.table
+find: \t\tif !ok {\n\t\t\treturn nil, ErrWrongKind\n\t\t}\n\t\treturn tb, nil
+replace: \t\tif !ok {\n\t\t\treturn nil, ErrWrongKind\n\t\t}\n\t\t_ = tb
 pkg: ./engine
 run: ^TestATableOpenedTwiceIsOneHandle$
 
@@ -1500,3 +1500,95 @@ find: func (s *Session) Log(ctx context.Context, ref Ref, limit int) (_ []Commit
 replace: func (s *Session) Log(ctx context.Context, ref Ref, limit int) (_ []CommitMeta, err error) {\n\t// not scrubbed
 pkg: ./engine
 run: ^TestTheAPIsErrorsCarryNoNames$
+
+# engine txn kinds
+id: engine-txn-kinds-a-table-handle-is-a-table
+file: engine/txn.go
+find: \t\ttb, ok := h.(*Table)\n\t\tif !ok {
+replace: \t\ttb, ok := h.(*Table)\n\t\tif !ok && false {
+pkg: ./engine
+run: ^TestKVAndCollectionsAreObjectsByName$
+
+id: engine-txn-kinds-a-kv-handle-is-a-kv-map
+file: engine/txn.go
+find: \t\tm, ok := h.(*KV)\n\t\tif !ok {
+replace: \t\tm, ok := h.(*KV)\n\t\tif !ok && false {
+pkg: ./engine
+run: ^TestKVAndCollectionsAreObjectsByName$
+
+id: engine-txn-kinds-a-collection-handle-is-a-collection
+file: engine/txn.go
+find: \t\tc, ok := h.(*Collection)\n\t\tif !ok {
+replace: \t\tc, ok := h.(*Collection)\n\t\tif !ok && false {
+pkg: ./engine
+run: ^TestKVAndCollectionsAreObjectsByName$
+
+id: engine-txn-kinds-an-open-kv-map-is-one-handle
+file: engine/txn.go
+find: \t\t\treturn nil, ErrWrongKind\n\t\t}\n\t\treturn m, nil
+replace: \t\t\treturn nil, ErrWrongKind\n\t\t}\n\t\t_ = m
+pkg: ./engine
+run: ^TestKVAndCollectionsAreObjectsByName$
+
+id: engine-txn-kinds-an-open-collection-is-one-handle
+file: engine/txn.go
+find: \t\t\treturn nil, ErrWrongKind\n\t\t}\n\t\treturn c, nil
+replace: \t\t\treturn nil, ErrWrongKind\n\t\t}\n\t\t_ = c
+pkg: ./engine
+run: ^TestKVAndCollectionsAreObjectsByName$
+
+id: engine-txn-kinds-a-dropped-kv-maps-handle-refuses
+file: engine/txn.go
+find: func (m *KV) drop() { m.gone = true }
+replace: func (m *KV) drop() {}
+pkg: ./engine
+run: ^TestKVAndCollectionsAreObjectsByName$
+
+id: engine-txn-kinds-a-dropped-collections-handle-refuses
+file: engine/txn.go
+find: func (c *Collection) drop() { c.gone = true }
+replace: func (c *Collection) drop() {}
+pkg: ./engine
+run: ^TestKVAndCollectionsAreObjectsByName$
+
+id: engine-txn-kinds-kv-reads-see-own-writes
+file: engine/txn.go
+find: \tif err := m.flush(ctx); err != nil {\n\t\treturn Value{}, false, err\n\t}
+replace: \tif err := error(nil); err != nil {\n\t\treturn Value{}, false, err\n\t}
+pkg: ./engine
+run: ^TestAKVHandleReadsItsWritesAndRefusesWhatIsNotAValue$
+
+id: engine-txn-kinds-collection-reads-see-own-writes
+file: engine/txn.go
+find: \tif err := c.flush(ctx); err != nil {\n\t\treturn Node{}, false, err\n\t}
+replace: \tif err := error(nil); err != nil {\n\t\treturn Node{}, false, err\n\t}
+pkg: ./engine
+run: ^TestACollectionHandleReadsItsWritesAndRefusesWhatIsNotADocument$
+
+id: engine-txn-kinds-a-refused-kv-value-is-invalid
+file: engine/txn.go
+find: \tcase errors.Is(err, kv.ErrKey), errors.Is(err, kv.ErrValue):
+replace: \tcase false:
+pkg: ./engine
+run: ^TestAKVHandleReadsItsWritesAndRefusesWhatIsNotAValue$
+
+id: engine-txn-kinds-a-refused-document-is-invalid
+file: engine/txn.go
+find: \tcase errors.Is(err, document.ErrID), errors.Is(err, document.ErrDocument):
+replace: \tcase false:
+pkg: ./engine
+run: ^TestACollectionHandleReadsItsWritesAndRefusesWhatIsNotADocument$
+
+id: engine-txn-kinds-a-kv-scan-stops-when-told
+file: engine/txn.go
+find: \t\tif more, err := each(k, v); err != nil || !more {
+replace: \t\tif _, err := each(k, v); err != nil {
+pkg: ./engine
+run: ^TestAKVHandleReadsItsWritesAndRefusesWhatIsNotAValue$
+
+id: engine-txn-kinds-a-collection-scan-stops-when-told
+file: engine/txn.go
+find: \t\tif more, err := each(id, n); err != nil || !more {
+replace: \t\tif _, err := each(id, n); err != nil {
+pkg: ./engine
+run: ^TestACollectionHandleReadsItsWritesAndRefusesWhatIsNotADocument$
