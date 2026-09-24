@@ -14,7 +14,6 @@ import (
 // both; revoking the table grant mid-session blocks the next call.
 func TestReadIsGrantedPerTable(t *testing.T) {
 	db, g := grantDB(t)
-	head := grantHead(t, db)
 	reader := engine.Principal{ID: "user:reader"}
 	if err := g.Grant(reader.ID, engine.ObjectScope("main", "people"), engine.PermRead); err != nil {
 		t.Fatalf("granting read on one table: %v", err)
@@ -37,7 +36,7 @@ func TestReadIsGrantedPerTable(t *testing.T) {
 	if _, err := tx.Table(ctx, "pets"); !errors.Is(err, engine.ErrPermissionDenied) {
 		t.Errorf("opening a table the reader may not read = %v, want ErrPermissionDenied", err)
 	}
-	if _, err := s.Diff(ctx, head, head, "pets"); !errors.Is(err, engine.ErrPermissionDenied) {
+	if _, err := s.Diff(ctx, "main", "main", "pets"); !errors.Is(err, engine.ErrPermissionDenied) {
 		t.Errorf("diffing a table the reader may not read = %v, want ErrPermissionDenied", err)
 	}
 	objs, err := s.Objects(ctx)
@@ -70,15 +69,4 @@ func TestReadIsGrantedPerTable(t *testing.T) {
 	if _, err := tx.Table(ctx, "people"); !errors.Is(err, engine.ErrPermissionDenied) {
 		t.Errorf("opening people after the grant was revoked = %v, want ErrPermissionDenied", err)
 	}
-}
-
-// grantHead is main's head commit, as a ref.
-func grantHead(t *testing.T, db *engine.Database) engine.Ref {
-	t.Helper()
-	s := grantSession(t, db, alice, "main")
-	log, err := s.Log(ctx, "main", 1)
-	if err != nil || len(log) != 1 {
-		t.Fatalf("main's log: %v, %v", log, err)
-	}
-	return engine.Ref(log[0].Hash.String())
 }

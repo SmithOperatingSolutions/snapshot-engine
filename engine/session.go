@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"unicode/utf8"
 
+	"github.com/SmithOperatingSolutions/snapshot-core/core/auth"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk/memstore"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/hash"
@@ -38,6 +39,14 @@ type Session struct {
 
 // Branch is the branch the session is on.
 func (s *Session) Branch() string { return s.branch }
+
+// mayRead asks the authorizer whether the session's principal may read the
+// object at path on its branch. The core asks about reads per branch only;
+// the engine asks per object, so read can be granted per table (Engine
+// Spec, L4 authorization).
+func (s *Session) mayRead(ctx context.Context, path string) error {
+	return translate(auth.Check(ctx, s.db.o.Authorizer, s.p, auth.Read, "path:"+s.branch+":"+path))
+}
 
 // ready refuses a call on a closed session or a session of a closed
 // database.
@@ -165,6 +174,11 @@ func (s *Session) Objects(ctx context.Context) (_ map[string]Kind, err error) {
 		}
 		if !ok {
 			return out, nil
+		}
+		if err := s.mayRead(ctx, c.Path); errors.Is(err, ErrPermissionDenied) {
+			continue // a name is data: an object the principal may not read is not listed
+		} else if err != nil {
+			return nil, err
 		}
 		out[c.Path] = kindOf(c.To.Model)
 	}
@@ -318,6 +332,9 @@ func (s *Session) AbortMerge(ctx context.Context) (err error) {
 func (s *Session) Diff(ctx context.Context, from, to Ref, path string) (_ *DiffIter, err error) {
 	defer s.db.scrubInto(ctx, &err)
 	if err := s.ready(); err != nil {
+		return nil, err
+	}
+	if err := s.mayRead(ctx, path); err != nil {
 		return nil, err
 	}
 	var refs [2]object.Ref

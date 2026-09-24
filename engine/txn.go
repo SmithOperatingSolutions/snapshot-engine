@@ -158,6 +158,9 @@ func (t *Txn) Table(ctx context.Context, name string) (_ *Table, err error) {
 	if err := t.check(); err != nil {
 		return nil, err
 	}
+	if err := t.s.mayRead(ctx, name); err != nil { // asked on every open, so a revoked grant blocks the next
+		return nil, err
+	}
 	if h, ok, err := t.opened(name); err != nil {
 		return nil, err
 	} else if ok {
@@ -201,6 +204,9 @@ func (t *Txn) KV(ctx context.Context, name string) (_ *KV, err error) {
 	if err := t.check(); err != nil {
 		return nil, err
 	}
+	if err := t.s.mayRead(ctx, name); err != nil { // asked on every open, so a revoked grant blocks the next
+		return nil, err
+	}
 	if h, ok, err := t.opened(name); err != nil {
 		return nil, err
 	} else if ok {
@@ -242,6 +248,9 @@ func (t *Txn) CreateCollection(ctx context.Context, name string) (_ *Collection,
 func (t *Txn) Collection(ctx context.Context, name string) (_ *Collection, err error) {
 	defer t.s.db.scrubInto(ctx, &err)
 	if err := t.check(); err != nil {
+		return nil, err
+	}
+	if err := t.s.mayRead(ctx, name); err != nil { // asked on every open, so a revoked grant blocks the next
 		return nil, err
 	}
 	if h, ok, err := t.opened(name); err != nil {

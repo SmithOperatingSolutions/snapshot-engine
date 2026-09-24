@@ -143,8 +143,8 @@ func TestGrantsMapTheCoresQuestions(t *testing.T) {
 
 // With every permission on the whole database, what the core never asks,
 // or a resource of a shape it never writes, is denied: Write, Commit,
-// Merge or Manage on the repository; Admin on a branch or a tag; Read, Commit
-// or Merge on one object; Write, Commit or Merge on a tag; an empty branch
+// Merge or Manage on the repository; Admin on a branch or a tag; Commit or
+// Merge on one object; Write, Commit or Merge on a tag; an empty branch
 // or path; a resource of an unknown kind; an unknown action; a principal
 // with no id. And nothing at all is allowed to a principal nothing was
 // granted to.
@@ -163,7 +163,6 @@ func TestGrantsDenyWhatTheyDoNotKnow(t *testing.T) {
 		{engine.ActionManage, "repo", false},
 		{engine.ActionAdmin, "branch:main", false},
 		{engine.ActionAdmin, "tag:v1", false},
-		{engine.ActionRead, "path:main:people", false},
 		{engine.ActionCommit, "path:main:people", false},
 		{engine.ActionMerge, "path:main:people", false},
 		{engine.ActionWrite, "tag:v1", false},
@@ -209,7 +208,6 @@ func TestAGrantThatNamesNothingIsRefused(t *testing.T) {
 		"a branch with a colon":      func() error { return g.Grant("user:bob", engine.BranchScope("a:b"), engine.PermRead) },
 		"a bad object path":          func() error { return g.Grant("user:bob", engine.ObjectScope("main", "a/../b"), engine.PermWrite) },
 		"Admin on a branch":          func() error { return g.Grant("user:bob", engine.BranchScope("main"), engine.PermAdmin) },
-		"Read on an object":          func() error { return g.Grant("user:bob", engine.ObjectScope("main", "people"), engine.PermRead) },
 		"Commit on an object":        func() error { return g.Grant("user:bob", engine.ObjectScope("main", "people"), engine.PermCommit) },
 		"Merge on an object":         func() error { return g.Grant("user:bob", engine.ObjectScope("main", "people"), engine.PermMerge) },
 		"a revoke of nothing":        func() error { return g.Revoke("user:bob", engine.DatabaseScope()) },

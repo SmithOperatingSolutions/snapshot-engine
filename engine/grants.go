@@ -58,11 +58,13 @@ func ObjectScope(branch, path string) Scope { return Scope{Branch: branch, Objec
 // use; a change takes effect on the next call a session makes. The zero
 // Grants allows nothing.
 //
-// How the core's questions map onto grants (every other question is
-// denied):
+// How the questions map onto grants (every other question is denied). The
+// core asks all but one; the engine asks Read on path:<b>:<p> itself when a
+// transaction opens an object, a diff reads one, or Objects lists one.
 //
 //	Read   repo, tag:<t>       Read at any scope
-//	Read   branch:<b>          Read on the database or on b
+//	Read   branch:<b>          Read on the database, on b, or on an object of b
+//	Read   path:<b>:<p>        Read on the database, on b, or on the object p of b
 //	Write  branch:<b>          Write on the database, on b or on an object of b; never when b is protected
 //	Write  path:<b>:<p>        Write on the database, on b, or on the object p of b
 //	Commit branch:<b>          Commit on the database or on b
@@ -71,12 +73,14 @@ func ObjectScope(branch, path string) Scope { return Scope{Branch: branch, Objec
 //	Manage tag:<t>             BranchAdmin on the database
 //	Admin  repo                Admin on the database
 //
-// The core asks per object only about writes, so an object scope takes
-// Write alone; a transaction's commit asks Write on its branch and then on
-// every object it changed, so Write on one object is a writer of that
-// object only. Reads of the repository as a whole (the log, the branch
-// and tag lists) are asked about the repository, not a branch, and are
-// open to anyone who may read anything.
+// An object scope takes Read and Write. A reader or writer of one object
+// is let through the branch's question (the working set is read and
+// written as a whole) and then asked per object: a transaction's commit
+// asks Write on every object it changed, and the engine asks Read on every
+// object it opens, so a grant on one table is a grant on that table only.
+// Reads of the repository as a whole (the log, the branch and tag lists)
+// are asked about the repository, not a branch, and are open to anyone who
+// may read anything.
 type Grants struct {
 	mu        sync.RWMutex
 	grants    map[string]map[Scope]permSet // principal id -> scope -> permissions
@@ -107,7 +111,7 @@ func (s Scope) validate() error {
 
 // checkGrant refuses what Grant and Revoke cannot store: no principal, no
 // permission or an unknown one, a scope that names nothing, Admin anywhere
-// but the database, and on one object anything but Write.
+// but the database, and on one object anything but Read or Write.
 func checkGrant(principal string, s Scope, perms []Permission) error {
 	if principal == "" {
 		return fmt.Errorf("%w: a grant needs a principal", ErrInvalid)
@@ -122,8 +126,8 @@ func checkGrant(principal string, s Scope, perms []Permission) error {
 		switch {
 		case p < PermRead || p > PermAdmin:
 			return fmt.Errorf("%w: permission %d", ErrInvalid, p)
-		case s.Object != "" && p != PermWrite:
-			return fmt.Errorf("%w: an object scope takes Write alone", ErrInvalid)
+		case s.Object != "" && p != PermRead && p != PermWrite:
+			return fmt.Errorf("%w: an object scope takes Read and Write alone", ErrInvalid)
 		case p == PermAdmin && s != (Scope{}):
 			return fmt.Errorf("%w: Admin is the database's alone", ErrInvalid)
 		}
@@ -225,9 +229,9 @@ func (g *Grants) allows(scopes map[Scope]permSet, a Action, resource string) boo
 		onBranch := func(p Permission) bool { return db.has(p) || scopes[Scope{Branch: branch}].has(p) }
 		switch a {
 		case auth.Read:
-			return onBranch(PermRead)
+			return onBranch(PermRead) || onAnObject(scopes, branch, PermRead)
 		case auth.Write:
-			return !g.protected[branch] && (onBranch(PermWrite) || onAnObject(scopes, branch))
+			return !g.protected[branch] && (onBranch(PermWrite) || onAnObject(scopes, branch, PermWrite))
 		case auth.Commit:
 			return onBranch(PermCommit)
 		case auth.Merge:
@@ -236,8 +240,12 @@ func (g *Grants) allows(scopes map[Scope]permSet, a Action, resource string) boo
 			return onBranch(PermBranchAdmin)
 		}
 	case "path":
-		if a == auth.Write {
-			return db.has(PermWrite) || scopes[Scope{Branch: branch}].has(PermWrite) || scopes[Scope{Branch: branch, Object: path}].has(PermWrite)
+		if a == auth.Write || a == auth.Read {
+			p := PermWrite
+			if a == auth.Read {
+				p = PermRead
+			}
+			return db.has(p) || scopes[Scope{Branch: branch}].has(p) || scopes[Scope{Branch: branch, Object: path}].has(p)
 		}
 	}
 	return false
@@ -280,9 +288,9 @@ func anywhere(scopes map[Scope]permSet, p Permission) bool {
 }
 
 // onAnObject says whether Write is granted on some object of branch.
-func onAnObject(scopes map[Scope]permSet, branch string) bool {
+func onAnObject(scopes map[Scope]permSet, branch string, p Permission) bool {
 	for s, ps := range scopes {
-		if s.Branch == branch && s.Object != "" && ps.has(PermWrite) {
+		if s.Branch == branch && s.Object != "" && ps.has(p) {
 			return true
 		}
 	}

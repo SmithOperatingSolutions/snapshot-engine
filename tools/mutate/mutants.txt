@@ -1313,29 +1313,29 @@ run: ^TestABranchASessionIsOnCannotBeDeleted$
 # engine grants
 id: grants-a-protected-branch-takes-no-direct-write
 file: engine/grants.go
-find: return !g.protected[branch] && (onBranch(PermWrite) || onAnObject(scopes, branch))
-replace: return (onBranch(PermWrite) || onAnObject(scopes, branch))
+find: return !g.protected[branch] && (onBranch(PermWrite) || onAnObject(scopes, branch, PermWrite))
+replace: return (onBranch(PermWrite) || onAnObject(scopes, branch, PermWrite))
 pkg: ./engine
 run: ^TestRevokeAndProtect$
 
 id: grants-an-object-writer-may-write-its-branch
 file: engine/grants.go
-find: return !g.protected[branch] && (onBranch(PermWrite) || onAnObject(scopes, branch))
+find: return !g.protected[branch] && (onBranch(PermWrite) || onAnObject(scopes, branch, PermWrite))
 replace: return !g.protected[branch] && (onBranch(PermWrite))
 pkg: ./engine
 run: ^TestGrantsMapTheCoresQuestions$
 
 id: grants-an-object-grant-covers-its-object
 file: engine/grants.go
-find: scopes[Scope{Branch: branch, Object: path}].has(PermWrite)
-replace: scopes[Scope{Branch: branch, Object: path}].has(PermRead)
+find: return db.has(p) || scopes[Scope{Branch: branch}].has(p) || scopes[Scope{Branch: branch, Object: path}].has(p)
+replace: return db.has(p) || scopes[Scope{Branch: branch}].has(p) || scopes[Scope{Branch: branch, Object: path}].has(PermRead)
 pkg: ./engine
 run: ^TestGrantsMapTheCoresQuestions$
 
 id: grants-a-branch-grant-covers-its-objects
 file: engine/grants.go
-find: return db.has(PermWrite) || scopes[Scope{Branch: branch}].has(PermWrite) || scopes[Scope{Branch: branch, Object: path}].has(PermWrite)
-replace: return db.has(PermWrite) || scopes[Scope{Branch: branch, Object: path}].has(PermWrite)
+find: return db.has(p) || scopes[Scope{Branch: branch}].has(p) || scopes[Scope{Branch: branch, Object: path}].has(p)
+replace: return db.has(p) || scopes[Scope{Branch: branch, Object: path}].has(p)
 pkg: ./engine
 run: ^TestGrantsMapTheCoresQuestions$
 
@@ -1390,7 +1390,7 @@ run: ^TestGrantsDenyWhatTheyDoNotKnow$
 
 id: grants-an-object-scope-takes-write-alone
 file: engine/grants.go
-find: case s.Object != "" && p != PermWrite:
+find: case s.Object != "" && p != PermRead && p != PermWrite:
 replace: case false:
 pkg: ./engine
 run: ^TestAGrantThatNamesNothingIsRefused$
@@ -1740,3 +1740,39 @@ find: if errors.As(err, &own) { // the caller's own callback's error goes back a
 replace: if errors.As(err, &own) && false { // the caller's own callback's error goes back as it came
 pkg: ./engine
 run: ^TestHandleReadsStopAndRefuse$
+
+# engine per-object read
+id: engine-opening-a-table-asks-read
+file: engine/txn.go
+find: func (t *Txn) Table(ctx context.Context, name string) (_ *Table, err error) {\n\tdefer t.s.db.scrubInto(ctx, &err)\n\tif err := t.check(); err != nil {\n\t\treturn nil, err\n\t}\n\tif err := t.s.mayRead(ctx, name); err != nil {
+replace: func (t *Txn) Table(ctx context.Context, name string) (_ *Table, err error) {\n\tdefer t.s.db.scrubInto(ctx, &err)\n\tif err := t.check(); err != nil {\n\t\treturn nil, err\n\t}\n\tif err := t.s.mayRead(ctx, name); err != nil && false {
+pkg: ./engine
+run: ^TestReadIsGrantedPerTable$
+
+id: engine-diff-asks-read
+file: engine/session.go
+find: if err := s.mayRead(ctx, path); err != nil {\n\t\treturn nil, err\n\t}
+replace: if err := s.mayRead(ctx, path); err != nil && false {\n\t\treturn nil, err\n\t}
+pkg: ./engine
+run: ^TestReadIsGrantedPerTable$
+
+id: engine-objects-lists-only-the-readable
+file: engine/session.go
+find: continue // a name is data: an object the principal may not read is not listed
+replace: _ = 0 // a name is data: an object the principal may not read is not listed
+pkg: ./engine
+run: ^TestReadIsGrantedPerTable$
+
+id: grants-a-reader-of-an-object-reads-the-branch
+file: engine/grants.go
+find: return onBranch(PermRead) || onAnObject(scopes, branch, PermRead)
+replace: return onBranch(PermRead)
+pkg: ./engine
+run: ^TestReadIsGrantedPerTable$
+
+id: grants-read-on-a-path-is-that-object
+file: engine/grants.go
+find: if a == auth.Read {\n\t\t\t\tp = PermRead\n\t\t\t}
+replace: if a == auth.Read && false {\n\t\t\t\tp = PermRead\n\t\t\t}
+pkg: ./engine
+run: ^TestReadIsGrantedPerTable$
