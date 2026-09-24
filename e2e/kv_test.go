@@ -172,3 +172,54 @@ func TestAKVObjectRoundTripsThroughARepository(t *testing.T) {
 		t.Fatalf("after a fresh open the object at %s has %d entries differing from the %d committed", h.path, len(got), len(want))
 	}
 }
+
+// E0: two branches setting different keys of one kv object merge clean,
+// and the merged object holds both sides' keys.
+func TestBranchesSettingDifferentKeysMergeClean(t *testing.T) {
+	h := newHost(t, mem.New())
+	h.put(vcs.MainBranch, settings("a", "1", "b", "2"))
+	base := h.commit(vcs.MainBranch, "base")
+	if err := h.r.CreateBranch(ctx, me, "feature", base.Hash); err != nil {
+		t.Fatal(err)
+	}
+	h.put(vcs.MainBranch, settings("a", "1", "b", "2", "c", "3"))
+	h.commit(vcs.MainBranch, "main adds c")
+	h.put("feature", settings("a", "1", "b", "2", "d", "4"))
+	feature := h.commit("feature", "feature adds d")
+	res, err := h.r.Merge(ctx, me, vcs.MainBranch, feature.Hash)
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if len(res.Conflicts) != 0 {
+		t.Fatalf("two branches setting different keys conflicted: %+v", res.Conflicts)
+	}
+	h.commit(vcs.MainBranch, "merge feature")
+	if got, want := h.read(vcs.MainBranch), settings("a", "1", "b", "2", "c", "3", "d", "4"); !sameEntries(got, want) {
+		t.Fatalf("after the merge main holds %d entries, want a, b, c and d", len(got))
+	}
+}
+
+// E0: two branches setting one key to two values conflict on that key
+// alone: one conflict, at the object's path, naming the key, and no other.
+func TestBranchesSettingOneKeyToTwoValuesConflictOnThatKeyAlone(t *testing.T) {
+	h := newHost(t, mem.New())
+	h.put(vcs.MainBranch, settings("a", "1", "b", "2"))
+	base := h.commit(vcs.MainBranch, "base")
+	if err := h.r.CreateBranch(ctx, me, "feature", base.Hash); err != nil {
+		t.Fatal(err)
+	}
+	h.put(vcs.MainBranch, settings("a", "main", "b", "2", "x", "1"))
+	h.commit(vcs.MainBranch, "main sets a and x")
+	h.put("feature", settings("a", "feature", "b", "2", "y", "1"))
+	feature := h.commit("feature", "feature sets a and y")
+	res, err := h.r.Merge(ctx, me, vcs.MainBranch, feature.Hash)
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if len(res.Conflicts) != 1 || res.Conflicts[0].Path != h.path {
+		t.Fatalf("the merge reported %d conflicts %+v, want one at %s", len(res.Conflicts), res.Conflicts, h.path)
+	}
+	if c := res.Conflicts[0].Model; len(c) != 1 || string(c[0].Location) != "a" {
+		t.Fatalf("the conflict names keys %+v, want the one key a", c)
+	}
+}
