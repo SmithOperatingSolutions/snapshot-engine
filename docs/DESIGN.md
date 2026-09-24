@@ -32,15 +32,26 @@ the decisions and the layer table the build enforces.
 No upward imports: a model never imports `engine`; `merge` never imports a
 model. A model never imports a backend, `core/vcs`, `core/repo` or `core/gc`:
 it reads and writes chunks through the port it is handed and knows nothing of
-history.
+history. The rule covers a model's tests too, so a test that drives a model
+through a repository lives in the root-level `e2e/` package.
 
 ## 3. Formats (a compatibility contract)
 
 Every on-disk structure a model writes carries a version, has a hand-written
 bounds-checked decoder and a fuzz target, and is sealed by the core under a
 domain tag of its own. The structures land with their models and are listed
-here as they do: the table's catalog record and tuple encoding (E2), kv's
-value framing (E0, E3), the document record (E5).
+here as they do.
+
+**kv, format 1** (`model/kv`, id 6). An object is a prolly map under
+`Model.Config`; its `model.Root` claims `Format 1`, `Size` = the entry count,
+`Depth 0`. A key is 1 to 4096 bytes (`prolly.MaxKeySize`), any bytes. A value
+is a frame `kind u8 · payload`: kind 1 is Bytes, its payload at most 256 KiB
+(`MaxValueSize`); kind 0 and unknown kinds are refused on encode and decode;
+the decoder copies the payload. Further kinds (counter, set, hash, sorted set,
+sequence) take further kind bytes (E3).
+
+Still to land: the table's root record, catalog and tuple encoding (E2), the
+document record (E5).
 
 ## 4. Testing tiers
 

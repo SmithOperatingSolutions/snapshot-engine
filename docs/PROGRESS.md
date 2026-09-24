@@ -13,13 +13,13 @@ collection, and the Engine Spec's L0 to L3 checklists and security rows.
 See [snapshot-core's PROGRESS](https://github.com/SmithOperatingSolutions/snapshot-core/blob/main/docs/PROGRESS.md).
 The engine takes the core by tag (`go.mod`) and never tracks its items here.
 
-**Updated 2026-09-24** · E1 done: the merge library; kv and table in progress
+**Updated 2026-09-24** · E1 done: the merge library; E0 done but for the first PR; table in progress
 
 ## Milestones
 
 | Milestone | Status | Delivers | Exit criteria |
 | --- | --- | --- | --- |
-| **E0 Foundations** | 🚧 | The module on snapshot-core v0.1.0; the gates (fmt, vet, lint with the layer table, vuln, race, coverage, redcheck, mutants); `model/kv` at one value kind, passing the core's `model/contract` from outside the core | A deliberately failing `test:` commit blocks a PR; a kv object round-trips through a repository and two branches setting different keys merge clean |
+| **E0 Foundations** | 🚧 (one item waits for the first PR) | The module on snapshot-core v0.1.0; the gates (fmt, vet, lint with the layer table, vuln, race, coverage, redcheck, mutants); `model/kv` at the bytes kind, passing the core's `model/contract` from outside the core, end to end through a repository; 23 mutants, 91% covered | A deliberately failing `test:` commit blocks a PR (first PR); a kv object round-trips through a repository and two branches setting different keys merge clean ✅ |
 | **E1 Merge library** | ✅ Done | `merge/`: `Scalar`, `Counter`, `Set` (observed-remove over write tags), `Sequence` (diff3 over element keys), `Tree` (a JSON-like `Node` merged by path, arrays as sequences, counter paths by option); conflicts as values with a path and a reason, never repaired; 97% covered, 11 mutants | Every policy has a property test: deterministic, one-sided change returns that side, symmetric (`TestScalarAndCounterProperties`, `TestSetProperties`, `TestSequenceProperties`, `TestTreeProperties`) |
 | **E2 Tables** | | `model/table`: catalog with tagged columns, order-preserving tuple encoding, primary and secondary indexes, diff per row then cell, merge schema first | Every E2 item below green |
 | **E3 Key-value** | | `model/kv` whole: bytes, counter, set, hash, sorted set, sequence, each with its policy | Every E3 item below green |
@@ -35,10 +35,10 @@ with their own progress; they import `engine/` alone.
 - [x] The module builds against snapshot-core v0.1.0 with `CGO_ENABLED=0`; gofmt, vet, lint and vuln clean (`mise run ci:quick`, 2026-09-24).
 - [x] The core's `redcheck` and `mutate` run here as Go tools (`go tool redcheck`, `go tool mutate`; `go.mod`).
 - [ ] `go tool redcheck` blocks a PR whose `test:` commit passes without its change (the first PR proves it, on purpose).
-- [ ] `model/kv` with the bytes kind passes the core's `model/contract`.
-- [ ] A kv object written through a repository reads back from a fresh open, byte for byte.
-- [ ] Two branches setting different keys merge clean; setting one key to two values conflicts on that key alone.
-- [ ] Every kv structure on disk has a bounds-checked decoder and a fuzz target.
+- [x] `model/kv` with the bytes kind passes the core's `model/contract` (`TestContract`).
+- [x] A kv object written through a repository reads back from a fresh open, byte for byte (`e2e`: `TestAKVObjectRoundTripsThroughARepository`).
+- [x] Two branches setting different keys merge clean; setting one key to two values conflicts on that key alone (`e2e`: `TestBranchesSettingDifferentKeysMergeClean`, `TestBranchesSettingOneKeyToTwoValuesConflictOnThatKeyAlone`; the model's own `TestMergeIsThreeWayPerKey`, `TestMergeAppliesOnlyValuesOfOurs`, `TestMergeDeletesForTheirsAndNamesAnAddedTwiceKey`).
+- [x] Every kv structure on disk has a bounds-checked decoder and a fuzz target (`TestAValueFrameRoundTrips`, `TestAFrameThatIsNotAValueIsRefused`, `FuzzDecodeValue`; `TestValidateRefusesWhatIsNotAnObject`, `TestWalkNamesEveryChunkOfAnObject`, `TestDiffIsOneChangePerKey`).
 
 ### E1 Merge library (`merge/`)
 - [x] Scalars: equal is clean; one side changed is that side; both changed differently is a conflict (`TestScalarsMergeByWhoChanged`).
@@ -104,3 +104,7 @@ with their own progress; they import `engine/` alone.
 
 | Where | What | Resolved |
 | --- | --- | --- |
+| the first plugin outside the core (kv) | A map-shaped model gets no help from the core: opening a prolly map under the root's claims, zipping two diffs from base, applying one side and reporting a disagreement were copied nearly verbatim from the core's `model/tree` (about 120 lines); document and table would copy them again | To ask of the core: a helper for prolly-map objects beside the frozen port |
+| the first plugin outside the core (kv) | The core's `model/contract` checks the merge identities (merge(b, o, o) = o and the like) and never exercises a conflict, so conflict semantics rest on each model's own tests | To ask of the core: a conflict case in the contract, with the model's `Subject` saying how to make two changes that collide |
+| the layer rule for models | depguard's `**/model/**` rule catches `_test.go` files too, so a model's end-to-end test through a repository cannot live beside the model | Such tests live in the root-level `e2e/` package (DESIGN §2) |
+| the module's first tidy | `go mod tidy` needed `GOPROXY=direct GONOSUMDB=github.com/SmithOperatingSolutions` to fetch the core's transitive sums | Check CI's setup-go with the default proxy on the first push |
