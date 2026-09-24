@@ -1055,3 +1055,165 @@ find: \t\tif o.dropped {\n\t\t\treturn nil, ErrNotFound\n\t\t}\n\t\treturn o.tab
 replace: \t\tif o.dropped {\n\t\t\treturn nil, ErrNotFound\n\t\t}\n\t\t_ = o.table
 pkg: ./engine
 run: ^TestATableOpenedTwiceIsOneHandle$
+
+# engine session
+id: session-a-closed-session-refuses
+file: engine/session.go
+find: if s.closed || s.db.isClosed() {
+replace: if s.db.isClosed() {
+pkg: ./engine
+run: ^TestAClosedSessionRefusesEveryCall$
+
+id: session-a-closed-database-refuses
+file: engine/session.go
+find: if s.closed || s.db.isClosed() {
+replace: if s.closed {
+pkg: ./engine
+run: ^TestAClosedSessionRefusesEveryCall$
+
+id: session-checkout-moves-only-on-success
+file: engine/session.go
+find: if _, err := s.db.r.Head(ctx, s.p, branch); err != nil {\n\t\treturn translate(err)\n\t}\n\ts.branch = branch
+replace: if _, err := s.db.r.Head(ctx, s.p, branch); err != nil && false {\n\t\treturn translate(err)\n\t}\n\ts.branch = branch
+pkg: ./engine
+run: ^TestBranchesAreCreatedCheckedOutAndDeleted$
+
+id: session-an-empty-ref-is-the-session-head
+file: engine/session.go
+find: if at == "" {\n\t\tat = Ref(s.branch)\n\t}
+replace: if at == "" && false {\n\t\tat = Ref(s.branch)\n\t}
+pkg: ./engine
+run: ^TestBranchesAreCreatedCheckedOutAndDeleted$
+
+id: session-a-branch-is-resolved-first
+file: engine/session.go
+find: c, err := s.db.r.Head(ctx, s.p, name)\n\tif err == nil {\n\t\treturn c.Hash, nil\n\t}
+replace: c, err := s.db.r.Head(ctx, s.p, name)\n\tif err == nil && false {\n\t\treturn c.Hash, nil\n\t}
+pkg: ./engine
+run: ^TestBranchesAreCreatedCheckedOutAndDeleted$
+
+id: session-a-tag-is-resolved-before-a-hash
+file: engine/session.go
+find: if err == nil {\n\t\treturn t.Target, nil\n\t}
+replace: if err == nil && false {\n\t\treturn t.Target, nil\n\t}
+pkg: ./engine
+run: ^TestBranchesAreCreatedCheckedOutAndDeleted$
+
+id: session-a-hash-no-commit-has-is-not-found
+file: engine/session.go
+find: if errors.Is(err, chunk.ErrNotFound) {\n\t\t\treturn hash.Hash{}, fmt.Errorf("%w: no commit by that hash", ErrNotFound)
+replace: if errors.Is(err, chunk.ErrNotFound) && false {\n\t\t\treturn hash.Hash{}, fmt.Errorf("%w: no commit by that hash", ErrNotFound)
+pkg: ./engine
+run: ^TestBranchesAreCreatedCheckedOutAndDeleted$
+
+id: session-never-deletes-its-own-branch
+file: engine/session.go
+find: if name == s.branch {
+replace: if name == s.branch && false {
+pkg: ./engine
+run: ^TestBranchesAreCreatedCheckedOutAndDeleted$
+
+id: session-objects-name-a-kv-map
+file: engine/session.go
+find: case kv.ID:\n\t\treturn KindKV
+replace: case kv.ID:\n\t\treturn KindTable
+pkg: ./engine
+run: ^TestObjectsNameEveryKind$
+
+id: session-objects-name-a-folder
+file: engine/session.go
+find: case tree.ID:\n\t\treturn KindFolder
+replace: case tree.ID:\n\t\treturn KindFile
+pkg: ./engine
+run: ^TestObjectsNameEveryKind$
+
+id: session-a-message-is-utf8
+file: engine/session.go
+find: if len(m) > vcs.MaxMessageLen || !utf8.ValidString(m) {
+replace: if len(m) > vcs.MaxMessageLen || (!utf8.ValidString(m) && false) {
+pkg: ./engine
+run: ^TestCommitRecordsTheWorkingSet$
+
+id: session-no-merge-mid-merge
+file: engine/session.go
+find: if ws.Merge != nil {\n\t\treturn MergeResult{}, ErrMergeInProgress\n\t}
+replace: if ws.Merge != nil && false {\n\t\treturn MergeResult{}, ErrMergeInProgress\n\t}
+pkg: ./engine
+run: ^TestMergeCommitsACleanMergeAndReportsConflicts$
+
+id: session-a-merge-reports-its-conflicts
+file: engine/session.go
+find: if len(res.Conflicts) > 0 {
+replace: if len(res.Conflicts) < 0 {
+pkg: ./engine
+run: ^TestMergeCommitsACleanMergeAndReportsConflicts$
+
+id: session-a-clean-merge-is-committed
+file: engine/session.go
+find: if ws.Merge == nil { // the branch held from already: nothing merged
+replace: if ws.Merge == nil || true { // the branch held from already: nothing merged
+pkg: ./engine
+run: ^TestMergeCommitsACleanMergeAndReportsConflicts$
+
+id: session-a-conflict-carries-its-parts
+file: engine/session.go
+find: out.Parts = append(out.Parts, ConflictPart{Location: m.Location, Reason: m.Reason})
+replace: _ = m
+pkg: ./engine
+run: ^TestMergeCommitsACleanMergeAndReportsConflicts$
+
+id: session-abort-without-a-merge-is-not-found
+file: engine/session.go
+find: if errors.Is(err, vcs.ErrNoMerge) {
+replace: if errors.Is(err, vcs.ErrNoMerge) && false {
+pkg: ./engine
+run: ^TestMergeCommitsACleanMergeAndReportsConflicts$
+
+id: session-diff-of-nothing-is-not-found
+file: engine/session.go
+find: case !ok[0] && !ok[1]:
+replace: case false:
+pkg: ./engine
+run: ^TestDiffYieldsTheModelsChanges$
+
+id: session-diff-refuses-a-change-of-kind
+file: engine/session.go
+find: case ok[0] && ok[1] && refs[0].Model != refs[1].Model:
+replace: case false:
+pkg: ./engine
+run: ^TestDiffYieldsTheModelsChanges$
+
+id: session-diff-of-a-created-object-is-additions
+file: engine/session.go
+find: case !ok[0]: // created: every part is an addition, whatever the model calls it against an empty object\n\t\td.only = Added
+replace: case !ok[0]: // created: every part is an addition, whatever the model calls it against an empty object\n\t\td.only = 0
+pkg: ./engine
+run: ^TestAnObjectOneSideHoldsIsEveryPartAdded$
+
+id: session-diff-of-a-removed-object-is-removals
+file: engine/session.go
+find: case !ok[1]:\n\t\td.only = Removed
+replace: case !ok[1]:\n\t\td.only = Added
+pkg: ./engine
+run: ^TestDiffYieldsTheModelsChanges$
+
+id: session-an-empty-table-has-the-schema
+file: engine/session.go
+find: e, err := table.Create(ctx, sc, cfg, t.Schema())
+replace: e, err := table.Create(ctx, sc, cfg, table.Schema{Columns: t.Schema().Columns[:1], PrimaryKey: t.Schema().PrimaryKey})
+pkg: ./engine
+run: ^TestAnObjectOneSideHoldsIsEveryPartAdded$
+
+id: session-a-change-keeps-its-kind
+file: engine/session.go
+find: c = Change{Kind: changeKinds[mc.Kind], Location: mc.Location}
+replace: c = Change{Kind: Modified, Location: mc.Location}
+pkg: ./engine
+run: ^TestDiffYieldsTheModelsChanges$
+
+id: session-a-log-limit-is-bounded
+file: engine/session.go
+find: if limit < 1 || limit > vcs.MaxLog {
+replace: if limit < 1 {
+pkg: ./engine
+run: ^TestLogListsCommitsNewestFirst$
