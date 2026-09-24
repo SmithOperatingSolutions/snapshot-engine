@@ -86,6 +86,7 @@ find: if err1 != nil || err2 != nil {
 replace: if err1 != nil && err2 != nil {
 pkg: ./merge
 run: ^TestTreesMergeByPath$
+
 # model/kv
 
 id: kv-encode-refuses-an-unknown-kind
@@ -388,6 +389,7 @@ find: conv, err := from.convertRow(row, mg.mt.schema)
 replace: conv, err := row, error(nil)
 pkg: ./model/table
 run: ^TestSchemasMergeByTag$
+
 # model/document
 
 id: document-parse-refuses-text-over-the-limit
@@ -550,6 +552,7 @@ find: if r.Err() == nil && len(id) == 0 {
 replace: if r.Err() == nil && len(id) < 0 {
 pkg: ./model/document
 run: ^TestLocationsRoundTripAndForgeriesAreRefused$
+
 # model/kv, the value kinds
 
 id: kv-frames-set-members-in-order
@@ -777,6 +780,7 @@ find: if errors.As(err, &e) && err == error(e) { // scrubbed already
 replace: if errors.As(err, &e) && false { // scrubbed already
 pkg: ./engine
 run: ^TestAScrubbedErrorIsNotScrubbedAgain$
+
 # model handles
 id: kv-handle-set-checks-the-key
 file: model/kv/handle.go
