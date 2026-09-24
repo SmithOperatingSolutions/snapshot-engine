@@ -37,6 +37,8 @@ var (
 	// ErrClosed is a call on a closed database, session or finished
 	// transaction.
 	ErrClosed = errors.New("engine: closed")
+	// ErrInUse is a branch another session is on.
+	ErrInUse = errors.New("engine: in use by another session")
 	// ErrInternal is a failure the caller can do nothing about (a store
 	// failure, a corrupt object); its details are in the log.
 	ErrInternal = errors.New("engine: internal error")
