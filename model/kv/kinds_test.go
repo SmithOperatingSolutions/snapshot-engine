@@ -148,6 +148,7 @@ func TestKindFramesThatAreNotValuesAreRefused(t *testing.T) {
 		"set member repeated":           cat([]byte{3, 2}, u64(1), []byte{1, 'a'}, u64(1), []byte{1, 'a'}),
 		"set tags out of order":         cat([]byte{3, 2}, u64(2), []byte{1, 'a'}, u64(1), []byte{1, 'a'}),
 		"set count over the limit":      {3, 0x81, 0x80, 0x04, 0},
+		"a set count of a trillion":     {3, 0x80, 0x80, 0x80, 0x80, 0x80, 0x20}, // refused before any member is read, or allocated for
 		"set member over its length":    cat([]byte{3, 1}, u64(1), []byte{0x81, 0x20}, make([]byte, 4097)),
 		"hash fields out of order":      {4, 2, 1, 'g', 1, 'v', 1, 'f', 1, 'v'},
 		"hash field repeated":           {4, 2, 1, 'f', 1, 'v', 1, 'f', 1, 'w'},

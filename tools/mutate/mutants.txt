@@ -550,3 +550,81 @@ find: if r.Err() == nil && len(id) == 0 {
 replace: if r.Err() == nil && len(id) < 0 {
 pkg: ./model/document
 run: ^TestLocationsRoundTripAndForgeriesAreRefused$
+# model/kv, the value kinds
+
+id: kv-frames-set-members-in-order
+file: model/kv/value.go
+find: if i > 0 && !lessMember(v.Members[i-1], m) {
+replace: if false && i > 0 && !lessMember(v.Members[i-1], m) {
+pkg: ./model/kv
+run: ^TestKindFramesThatAreNotValuesAreRefused$
+
+id: kv-frames-hash-fields-in-order
+file: model/kv/value.go
+find: if i > 0 && name <= last {
+replace: if false && i > 0 && name <= last {
+pkg: ./model/kv
+run: ^TestKindFramesThatAreNotValuesAreRefused$
+
+id: kv-frames-sorted-set-in-order
+file: model/kv/value.go
+find: if i > 0 && !lessScored(v.Scores[i-1], s) {
+replace: if false && i > 0 && !lessScored(v.Scores[i-1], s) {
+pkg: ./model/kv
+run: ^TestKindFramesThatAreNotValuesAreRefused$
+
+id: kv-frames-a-score-is-a-score
+file: model/kv/value.go
+find: if math.IsNaN(s.Score) || (s.Score == 0 && bits != 0) {
+replace: if false && (math.IsNaN(s.Score) || (s.Score == 0 && bits != 0)) {
+pkg: ./model/kv
+run: ^TestKindFramesThatAreNotValuesAreRefused$
+
+id: kv-frames-refuse-trailing-bytes
+file: model/kv/value.go
+find: if err := r.Done(); err != nil {
+replace: if err := r.Done(); err != nil && false {
+pkg: ./model/kv
+run: ^TestKindFramesThatAreNotValuesAreRefused$
+
+id: kv-frames-bound-the-count
+file: model/kv/value.go
+find: if n > MaxMembers {\n\t\treturn 0, fmt.Errorf(
+replace: if n > MaxMembers && false {\n\t\treturn 0, fmt.Errorf(
+pkg: ./model/kv
+run: ^TestKindFramesThatAreNotValuesAreRefused$
+
+id: kv-frames-bound-a-member
+file: model/kv/value.go
+find: if len(m) > MaxMember {
+replace: if len(m) > MaxMember && false {
+pkg: ./model/kv
+run: ^TestKindFramesThatAreNotValuesAreRefused$
+
+id: kv-encode-refuses-a-repeated-member
+file: model/kv/value.go
+find: if i > 0 && sameMember(ms[i-1], m) {
+replace: if false && i > 0 && sameMember(ms[i-1], m) {
+pkg: ./model/kv
+run: ^TestKindFramesThatAreNotValuesAreRefused$
+
+id: kv-encode-refuses-nan
+file: model/kv/value.go
+find: if math.IsNaN(s.Score) {\n\t\t\t\treturn nil, fmt.Errorf("%w: sorted-set member %q scored NaN", ErrValue, s.Member)
+replace: if math.IsNaN(s.Score) && false {\n\t\t\t\treturn nil, fmt.Errorf("%w: sorted-set member %q scored NaN", ErrValue, s.Member)
+pkg: ./model/kv
+run: ^TestKindFramesThatAreNotValuesAreRefused$
+
+id: kv-encode-a-negative-zero-is-zero
+file: model/kv/value.go
+find: if s.Score == 0 {\n\t\t\ts.Score = 0 // a negative zero is written as zero\n\t\t}
+replace: if s.Score == 0 && false {\n\t\t\ts.Score = 0 // a negative zero is written as zero\n\t\t}
+pkg: ./model/kv
+run: ^TestKindFramesThatAreNotValuesAreRefused$
+
+id: kv-counter-is-its-int64
+file: model/kv/value.go
+find: w.U64(uint64(v.Counter))
+replace: w.U64(uint64(v.Counter) + 1)
+pkg: ./model/kv
+run: ^TestKindFramesAreTheDocumentedEncodings$
