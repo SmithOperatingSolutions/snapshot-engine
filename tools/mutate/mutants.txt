@@ -886,3 +886,165 @@ find: m, err := spec(c).Open(ctx, s, root)
 replace: m, err := prolly.Open(ctx, s, c, root.Hash)
 pkg: ./model/document
 run: ^TestACollectionRefusesWhatIsNotOurs$
+
+# engine txn
+id: engine-txn-a-branch-mid-merge-takes-no-transaction
+file: engine/txn.go
+find: \tif ws.Merge != nil {\n\t\treturn nil, ErrMergeInProgress\n\t}
+replace: \tif false {\n\t\treturn nil, ErrMergeInProgress\n\t}
+pkg: ./engine
+run: ^TestABranchMidMergeTakesNoTransaction$
+
+id: engine-txn-a-finished-transaction-refuses
+file: engine/txn.go
+find: \tif t.closed || t.s.db.isClosed() {
+replace: \tif t.s.db.isClosed() {
+pkg: ./engine
+run: ^TestRollbackLeavesTheWorkingSetUntouched$
+
+id: engine-txn-a-closed-database-refuses
+file: engine/txn.go
+find: \tif t.closed || t.s.db.isClosed() {
+replace: \tif t.closed {
+pkg: ./engine
+run: ^TestAFinishedTransactionAndItsHandlesRefuse$
+
+id: engine-txn-a-dropped-object-is-not-found
+file: engine/txn.go
+find: \t\tif o.dropped {\n\t\t\treturn object.Ref{}, false, nil\n\t\t}
+replace: \t\tif false {\n\t\t\treturn object.Ref{}, false, nil\n\t\t}
+pkg: ./engine
+run: ^TestObjectsByName$
+
+id: engine-txn-a-name-must-be-a-path
+file: engine/txn.go
+find: \tif err := object.ValidPath(name); err != nil {\n\t\treturn nil, fmt.Errorf("%w (%w)", ErrInvalid, err)
+replace: \tif err := object.ValidPath(name); err != nil && false {\n\t\treturn nil, fmt.Errorf("%w (%w)", ErrInvalid, err)
+pkg: ./engine
+run: ^TestObjectsByName$
+
+id: engine-txn-a-name-taken-is-refused
+file: engine/txn.go
+find: \t} else if ok {\n\t\treturn nil, ErrExists
+replace: \t} else if ok && false {\n\t\treturn nil, ErrExists
+pkg: ./engine
+run: ^TestObjectsByName$
+
+id: engine-txn-another-model-is-the-wrong-kind
+file: engine/txn.go
+find: \tif ref.Model != table.ID {\n\t\treturn nil, ErrWrongKind
+replace: \tif false {\n\t\treturn nil, ErrWrongKind
+pkg: ./engine
+run: ^TestObjectsByName$
+
+id: engine-txn-drop-needs-the-object
+file: engine/txn.go
+find: \t} else if !ok {\n\t\treturn ErrNotFound\n\t}\n\tif o, ok := t.objs[name]; ok && o.table != nil {
+replace: \t} else if !ok && false {\n\t\treturn ErrNotFound\n\t}\n\tif o, ok := t.objs[name]; ok && o.table != nil {
+pkg: ./engine
+run: ^TestObjectsByName$
+
+id: engine-txn-a-dropped-tables-handle-refuses
+file: engine/txn.go
+find: \t\to.table.gone = true
+replace: \t\t_ = o.table
+pkg: ./engine
+run: ^TestObjectsByName$
+
+id: engine-txn-a-drop-reaches-the-namespace
+file: engine/txn.go
+find: \t\t\t\tif err := e.Delete(name); err != nil {
+replace: \t\t\t\tif err := error(nil); err != nil {
+pkg: ./engine
+run: ^TestObjectsByName$
+
+id: engine-txn-commit-flushes-every-handle
+file: engine/txn.go
+find: \t\tif err := o.table.flush(ctx); err != nil {\n\t\t\treturn nil, err\n\t\t}
+replace: \t\tif err := error(nil); err != nil {\n\t\t\treturn nil, err\n\t\t}
+pkg: ./engine
+run: ^TestTwoTransactionsOnDifferentRowsBothCommit$
+
+id: engine-txn-commit-finishes-the-transaction
+file: engine/txn.go
+find: \tif err := t.check(); err != nil {\n\t\treturn err\n\t}\n\tt.closed = true\n\tours, err := t.namespace(ctx)
+replace: \tif err := t.check(); err != nil {\n\t\treturn err\n\t}\n\tours, err := t.namespace(ctx)
+pkg: ./engine
+run: ^TestRollbackLeavesTheWorkingSetUntouched$
+
+id: engine-txn-no-commit-into-a-merge
+file: engine/txn.go
+find: \t\tif cur.Merge != nil {\n\t\t\treturn ErrMergeInProgress\n\t\t}
+replace: \t\tif false {\n\t\t\treturn ErrMergeInProgress\n\t\t}
+pkg: ./engine
+run: ^TestABranchMidMergeTakesNoTransaction$
+
+id: engine-txn-a-moved-working-set-is-merged
+file: engine/txn.go
+find: \t\tif cur.Working == t.ws.Working {\n\t\t\tnext.Working = ours.Root()
+replace: \t\tif true {\n\t\t\tnext.Working = ours.Root()
+pkg: ./engine
+run: ^TestTwoTransactionsOnDifferentRowsBothCommit$
+
+id: engine-txn-a-collision-serializes
+file: engine/txn.go
+find: \t\t\tif len(res.Conflicts) > 0 {\n\t\t\t\treturn ErrSerialization\n\t\t\t}
+replace: \t\t\tif false {\n\t\t\t\treturn ErrSerialization\n\t\t\t}
+pkg: ./engine
+run: ^TestTwoTransactionsOnTheSameCellSerialize$
+
+id: engine-txn-a-lost-swap-is-tried-again
+file: engine/txn.go
+find: \t\tif !errors.Is(err, vcs.ErrConflict) {\n\t\t\treturn translate(err)
+replace: \t\tif true {\n\t\t\treturn translate(err)
+pkg: ./engine
+run: ^TestACommitThatLosesTheSwapTriesAgain$
+
+id: engine-txn-staged-follows-working
+file: engine/txn.go
+find: \t\tnext.Staged = next.Working // the engine keeps no staging area
+replace: \t\t_ = next.Staged // the engine keeps no staging area
+pkg: ./engine
+run: ^TestABranchMidMergeTakesNoTransaction$
+
+id: engine-txn-reads-see-own-writes
+file: engine/txn.go
+find: \tif err := h.flush(ctx); err != nil {\n\t\treturn nil, false, err\n\t}
+replace: \tif err := error(nil); err != nil {\n\t\treturn nil, false, err\n\t}
+pkg: ./engine
+run: ^TestATransactionReadsItsSnapshotAndItsOwnWrites$
+
+id: engine-txn-scan-sees-own-writes
+file: engine/txn.go
+find: \tif err := h.flush(ctx); err != nil {\n\t\treturn err\n\t}\n\trows, err := h.t.Scan(ctx)
+replace: \tif err := error(nil); err != nil {\n\t\treturn err\n\t}\n\trows, err := h.t.Scan(ctx)
+pkg: ./engine
+run: ^TestATransactionReadsItsSnapshotAndItsOwnWrites$
+
+id: engine-txn-a-scan-stops-when-told
+file: engine/txn.go
+find: \t\tif more, err := each(k, r); err != nil || !more {
+replace: \t\tif more, err := each(k, r); err != nil || !more && false {
+pkg: ./engine
+run: ^TestHandleReadsStopAndRefuse$
+
+id: engine-txn-a-refused-value-is-invalid
+file: engine/txn.go
+find: \tcase errors.Is(err, table.ErrValue), errors.Is(err, table.ErrSchema):\n\t\tto = ErrInvalid
+replace: \tcase errors.Is(err, table.ErrValue), errors.Is(err, table.ErrSchema):\n\t\tto = ErrExists
+pkg: ./engine
+run: ^TestARefusedWriteWritesNothing$
+
+id: engine-txn-a-duplicate-key-exists
+file: engine/txn.go
+find: \tcase errors.Is(err, table.ErrDuplicate):\n\t\tto = ErrExists
+replace: \tcase errors.Is(err, table.ErrDuplicate):\n\t\tto = ErrInvalid
+pkg: ./engine
+run: ^TestARefusedWriteWritesNothing$
+
+id: engine-txn-lookup-sees-own-writes
+file: engine/txn.go
+find: \tif err := h.flush(ctx); err != nil {\n\t\treturn err\n\t}\n\trows, err := h.t.IndexLookup(ctx, index, values...)
+replace: \tif err := error(nil); err != nil {\n\t\treturn err\n\t}\n\trows, err := h.t.IndexLookup(ctx, index, values...)
+pkg: ./engine
+run: ^TestATransactionReadsItsSnapshotAndItsOwnWrites$
