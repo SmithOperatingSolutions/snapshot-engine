@@ -670,3 +670,85 @@ func TestARevokedGrantBlocksTheNextCall(t *testing.T) {
 		t.Errorf("Log after the grant was restored: %v", err)
 	}
 }
+
+// A conflict says why its object conflicts: deleted on one side and
+// changed on the other, added differently on both sides, or held by
+// another kind of object on each side; each reason is its own.
+func TestMergeConflictsSayWhy(t *testing.T) {
+	d, s, _ := sessDB(t)
+	sessKV(t, d, "main", "gone", map[string]string{"a": "1"})
+	sessKV(t, d, "main", "shape", map[string]string{"a": "1"})
+	sessCommit(t, d, "main", "base")
+	if err := s.CreateBranch(ctx, "feature", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.PutObject(ctx, d, sessAdmin, "main", "gone", nil); err != nil {
+		t.Fatal(err)
+	}
+	sessKV(t, d, "main", "fresh", map[string]string{"a": "main"})
+	sessKV(t, d, "main", "shape", map[string]string{"a": "2"})
+	sessCommit(t, d, "main", "main")
+	sessKV(t, d, "feature", "gone", map[string]string{"a": "changed"})
+	sessKV(t, d, "feature", "fresh", map[string]string{"a": "feature"})
+	br, err := blobmodel.Write(ctx, engine.Chunks(d), bytes.NewReader([]byte("now a file")), engine.StreamConfig(d))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.PutObject(ctx, d, sessAdmin, "feature", "shape", &object.Ref{Model: blobmodel.ID, Root: br}); err != nil {
+		t.Fatal(err)
+	}
+	sessCommit(t, d, "feature", "feature")
+	r, err := s.Merge(ctx, "feature", "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	why := map[string]string{}
+	for _, c := range r.Conflicts {
+		why[c.Path] = c.Why
+	}
+	for path, want := range map[string]string{"gone": "deleted on one side", "fresh": "added differently", "shape": "what kind of object"} {
+		if !strings.Contains(why[path], want) {
+			t.Errorf("the conflict at %s says %q, want it to say %q", path, why[path], want)
+		}
+	}
+	if len(why) != 3 {
+		t.Errorf("conflicts %v, want gone, fresh and shape", why)
+	}
+}
+
+// A ref is resolved under the grants its kind needs, and a denied lookup
+// stops there: a tag needs read on the tag, a commit hash read on the
+// repository, a branch read on the branch; a merge reads the branch's
+// working set first; a message the core cannot hold is refused before a
+// merge begins.
+func TestRefsAreResolvedUnderTheirGrants(t *testing.T) {
+	d, s, g := sessDB(t)
+	sessKV(t, d, "main", "config", map[string]string{"a": "1"})
+	c1 := sessCommit(t, d, "main", "one")
+	if err := engine.CreateTag(ctx, d, sessAdmin, "v1", c1); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		action   auth.Action
+		resource string
+		call     func() error
+	}{
+		"a tag":                 {auth.Read, "tag:v1", func() error { return s.CreateBranch(ctx, "b1", "v1") }},
+		"a commit hash":         {auth.Read, "repo", func() error { return s.CreateBranch(ctx, "b2", engine.Ref(c1.String())) }},
+		"a diff's commits":      {auth.Read, "repo", func() error { _, err := s.Diff(ctx, "main", "main", "config"); return err }},
+		"a merge's working set": {auth.Read, "branch:main", func() error { _, err := s.Merge(ctx, "v1", "m"); return err }},
+	} {
+		g.set(tc.action, tc.resource, true)
+		err := tc.call()
+		g.set(tc.action, tc.resource, false)
+		if !errors.Is(err, engine.ErrPermissionDenied) {
+			t.Errorf("%s, denied %d on %s: %v, want ErrPermissionDenied", name, tc.action, tc.resource, err)
+		}
+	}
+	if got := sessBranches(t, d); strings.Join(got, " ") != "main" {
+		t.Errorf("denied lookups created branches: %v", got)
+	}
+	if _, err := s.Merge(ctx, "v1", "\xff"); !errors.Is(err, engine.ErrInvalid) {
+		t.Errorf("a merge with a message that is not UTF-8 = %v, want ErrInvalid", err)
+	}
+}

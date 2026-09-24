@@ -1217,3 +1217,45 @@ find: if limit < 1 || limit > vcs.MaxLog {
 replace: if limit < 1 {
 pkg: ./engine
 run: ^TestLogListsCommitsNewestFirst$
+
+id: session-a-delete-against-an-edit-says-so
+file: engine/session.go
+find: return "deleted on one side and changed on the other"
+replace: return "changed on both sides in ways its model could not combine"
+pkg: ./engine
+run: ^TestMergeConflictsSayWhy$
+
+id: session-two-additions-say-so
+file: engine/session.go
+find: return "added differently on both sides"
+replace: return "changed on both sides in ways its model could not combine"
+pkg: ./engine
+run: ^TestMergeConflictsSayWhy$
+
+id: session-a-change-of-kind-says-so
+file: engine/session.go
+find: return "the sides disagree about what kind of object it is"
+replace: return "changed on both sides in ways its model could not combine"
+pkg: ./engine
+run: ^TestMergeConflictsSayWhy$
+
+id: session-a-denied-tag-lookup-stops
+file: engine/session.go
+find: if !errors.Is(err, vcs.ErrTagNotFound) && !errors.Is(err, vcs.ErrInvalidName) {\n\t\treturn hash.Hash{}, translate(err)
+replace: if !errors.Is(err, vcs.ErrTagNotFound) && !errors.Is(err, vcs.ErrInvalidName) && false {\n\t\treturn hash.Hash{}, translate(err)
+pkg: ./engine
+run: ^TestRefsAreResolvedUnderTheirGrants$
+
+id: session-a-denied-commit-lookup-stops
+file: engine/session.go
+find: \t\treturn hash.Hash{}, translate(err)\n\t}\n\treturn c.Hash, nil\n}
+replace: \t\treturn hash.Hash{}, nil\n\t}\n\treturn c.Hash, nil\n}
+pkg: ./engine
+run: ^TestRefsAreResolvedUnderTheirGrants$
+
+id: session-a-merge-message-is-checked
+file: engine/session.go
+find: if err := message(msg); err != nil {\n\t\treturn MergeResult{}, err\n\t}
+replace: if err := message(msg); err != nil && false {\n\t\treturn MergeResult{}, err\n\t}
+pkg: ./engine
+run: ^TestRefsAreResolvedUnderTheirGrants$
