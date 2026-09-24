@@ -60,7 +60,8 @@ func withIndex(s table.Schema, ix table.Index) table.Schema {
 			out = append(out, x)
 		}
 	}
-	s.Indexes = append(out, ix)
+	out = append(out, ix)
+	s.Indexes = out
 	return s
 }
 
@@ -299,7 +300,7 @@ func TestIndependentSchemaEditsMergeCleanAndSymmetric(t *testing.T) {
 				}
 			}
 			for k := range rapid.IntRange(0, 2).Draw(rt, fmt.Sprintf("adds%d", side)) {
-				next = withColumn(next, table.Column{Tag: table.Tag(100 + 50*side + k), Name: fmt.Sprintf("a%d_%d", side, k), Type: table.TypeText, Nullable: true})
+				next = withColumn(next, table.Column{Tag: table.Tag(100 + 50*side + k), Name: fmt.Sprintf("a%d_%d", side, 9-k), Type: table.TypeText, Nullable: true}) // names run against the tags
 			}
 			if rapid.Bool().Draw(rt, fmt.Sprintf("index%d", side)) {
 				next = withIndex(next, table.Index{Tag: table.Tag(200 + side), Columns: []table.Tag{1}})

@@ -42,7 +42,7 @@ func TestATableTakesANewSchema(t *testing.T) {
 	}
 	for i, row := range rows {
 		id := int64(i + 1)
-		if row[2] != "name"+itoa(id) || row[3] != int64(20+id) || row[4] != nil || row[5] != nil {
+		if row[2] != "name"+itoa(id) || row[3] != 20+id || row[4] != nil || row[5] != nil {
 			t.Errorf("row %d after the new schema = %v: want the name under tag 2, age widened to int64, email gone, phone NULL", id, row)
 		}
 	}
