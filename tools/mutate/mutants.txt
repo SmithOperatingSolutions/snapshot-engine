@@ -1099,12 +1099,12 @@ replace: if err == nil && false {\n\t\treturn t.Target, nil\n\t}
 pkg: ./engine
 run: ^TestBranchesAreCreatedCheckedOutAndDeleted$
 
-id: session-a-hash-no-commit-has-is-not-found
+id: session-a-denied-hash-lookup-ends-the-resolution
 file: engine/session.go
-find: if errors.Is(err, chunk.ErrNotFound) {\n\t\t\treturn hash.Hash{}, fmt.Errorf("%w: no commit %s", ErrNotFound, h)
-replace: if errors.Is(err, chunk.ErrNotFound) && false {\n\t\t\treturn hash.Hash{}, fmt.Errorf("%w: no commit %s", ErrNotFound, h)
+find: if !errors.Is(err, chunk.ErrNotFound) {\n\t\t\treturn hash.Hash{}, translate(err)\n\t\t}\n\t}\n\tc, err := s.db.r.Head(ctx, s.p, name)
+replace: if false {\n\t\t\treturn hash.Hash{}, translate(err)\n\t\t}\n\t}\n\tc, err := s.db.r.Head(ctx, s.p, name)
 pkg: ./engine
-run: ^TestBranchesAreCreatedCheckedOutAndDeleted$
+run: ^TestRefsAreResolvedUnderTheirGrants$
 
 id: session-never-deletes-its-own-branch
 file: engine/session.go
@@ -1248,8 +1248,8 @@ run: ^TestRefsAreResolvedUnderTheirGrants$
 
 id: session-a-denied-commit-lookup-stops
 file: engine/session.go
-find: \t\treturn hash.Hash{}, translate(err)\n\t}\n\treturn c.Hash, nil\n}
-replace: \t\treturn hash.Hash{}, nil\n\t}\n\treturn c.Hash, nil\n}
+find: \t\t\treturn hash.Hash{}, translate(err)\n\t\t}\n\t}\n\tc, err := s.db.r.Head(ctx, s.p, name)
+replace: \t\t\treturn hash.Hash{}, nil\n\t\t}\n\t}\n\tc, err := s.db.r.Head(ctx, s.p, name)
 pkg: ./engine
 run: ^TestRefsAreResolvedUnderTheirGrants$
 
@@ -1776,3 +1776,10 @@ find: if a == auth.Read {\n\t\t\t\tp = PermRead\n\t\t\t}
 replace: if a == auth.Read && false {\n\t\t\t\tp = PermRead\n\t\t\t}
 pkg: ./engine
 run: ^TestReadIsGrantedPerTable$
+
+id: session-a-full-hash-is-a-commit-first
+file: engine/session.go
+find: if h, err := hash.Parse(name); err == nil {\n\t\tc, err := s.db.r.ReadCommit(ctx, s.p, h)
+replace: if h, err := hash.Parse(name); err == nil && false {\n\t\tc, err := s.db.r.ReadCommit(ctx, s.p, h)
+pkg: ./engine
+run: ^TestAReaderOfOneBranchNamesCommitsByHash$

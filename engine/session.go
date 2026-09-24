@@ -57,10 +57,22 @@ func (s *Session) ready() error {
 	return nil
 }
 
-// resolve is the commit a ref names: a branch's head, else a tag's commit,
-// else the commit whose hash the ref spells in hex.
+// resolve is the commit a ref names. A ref that spells a commit hash in
+// full is that commit, when the repository holds it (asked as a read of the
+// repository); otherwise, and for any other ref, it is a branch's head, else
+// a tag's commit. A denied lookup ends the resolution: what a principal may
+// not read is not probed past.
 func (s *Session) resolve(ctx context.Context, ref Ref) (hash.Hash, error) {
 	name := string(ref)
+	if h, err := hash.Parse(name); err == nil {
+		c, err := s.db.r.ReadCommit(ctx, s.p, h)
+		if err == nil {
+			return c.Hash, nil
+		}
+		if !errors.Is(err, chunk.ErrNotFound) {
+			return hash.Hash{}, translate(err)
+		}
+	}
 	c, err := s.db.r.Head(ctx, s.p, name)
 	if err == nil {
 		return c.Hash, nil
@@ -75,17 +87,7 @@ func (s *Session) resolve(ctx context.Context, ref Ref) (hash.Hash, error) {
 	if !errors.Is(err, vcs.ErrTagNotFound) && !errors.Is(err, vcs.ErrInvalidName) {
 		return hash.Hash{}, translate(err)
 	}
-	h, err := hash.Parse(name)
-	if err != nil {
-		return hash.Hash{}, fmt.Errorf("%w: no branch, tag or commit named %q", ErrNotFound, name)
-	}
-	if c, err = s.db.r.ReadCommit(ctx, s.p, h); err != nil {
-		if errors.Is(err, chunk.ErrNotFound) {
-			return hash.Hash{}, fmt.Errorf("%w: no commit %s", ErrNotFound, h)
-		}
-		return hash.Hash{}, translate(err)
-	}
-	return c.Hash, nil
+	return hash.Hash{}, fmt.Errorf("%w: no branch, tag or commit named %q", ErrNotFound, name)
 }
 
 // Checkout moves the session to another branch, which must exist and be
