@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -34,7 +35,25 @@ var (
 	// ErrClosed is a call on a closed database, session or finished
 	// transaction.
 	ErrClosed = errors.New("engine: closed")
+	// ErrInternal is a failure the caller can do nothing about (a store
+	// failure, a corrupt object); its details are in the log.
+	ErrInternal = errors.New("engine: internal error")
 )
+
+// Error is what a caller holds: an engine error and the correlation id its
+// details are logged under. It unwraps to the engine error alone.
+type Error struct {
+	Kind        error // one of the Err values above
+	Correlation string
+}
+
+func (e *Error) Error() string { return e.Kind.Error() + " [ref " + e.Correlation + "]" }
+
+// Unwrap is the engine error, so errors.Is matches it.
+func (e *Error) Unwrap() error { return e.Kind }
+
+// scrub is what the API returns in place of err. (Stub.)
+func scrub(ctx context.Context, l Logger, err error) error { return err }
 
 // errNotImplemented is what a stub returns while E4 is built.
 var errNotImplemented = errors.New("engine: not implemented")
