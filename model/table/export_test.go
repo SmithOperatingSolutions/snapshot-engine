@@ -31,3 +31,6 @@ func DecodeRoot(b []byte) (catalog []byte, primaryRoot [32]byte, rows uint64, in
 	}
 	return r.catalog, r.primary.root, r.primary.count, indexes, nil
 }
+
+// MaxCell exposes the longest cell a column can hold.
+func MaxCell(c Column) int { return maxCell(c) }

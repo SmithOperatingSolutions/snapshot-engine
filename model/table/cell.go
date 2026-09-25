@@ -669,3 +669,6 @@ func decodeCell(b []byte, c Column) (any, []byte, error) {
 	}
 	return v, b, nil
 }
+
+// maxCell is the longest cell column c can hold.
+func maxCell(c Column) int { return 0 }
