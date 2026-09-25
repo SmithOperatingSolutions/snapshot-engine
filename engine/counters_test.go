@@ -71,3 +71,33 @@ func TestACounterIncrementedOnTwoBranchesMergesToTheSum(t *testing.T) {
 		t.Errorf("a, set to %q on both branches, merged to %q, want it once", "same", v.Bytes)
 	}
 }
+
+// #7, DESIGN D18: counters leave the item rule. Two transactions from one
+// snapshot that only INCR or DECR one counter both commit, and the
+// counter holds the sum of what both added: the kv model sums a
+// counter's deltas, so neither write is lost.
+func TestConcurrentIncrementsOfOneCounterBothCommit(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		by     [2]int64
+		expect int64
+	}{
+		{"the same INCR on both", [2]int64{1, 1}, 1002},
+		{"an INCR and a DECR", [2]int64{5, -2}, 1003},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, s := counterDB(t)
+			x, y := txnBegin(t, s), txnBegin(t, txnSession(t, db, "main"))
+			incr(t, x, "hits", tc.by[0])
+			incr(t, y, "hits", tc.by[1])
+			for i, tx := range []*engine.Txn{x, y} {
+				if err := tx.Commit(ctx); err != nil {
+					t.Fatalf("transaction %d, adding %d to hits from one snapshot = %v, want it to commit: a counter's increments sum", i+1, tc.by[i], err)
+				}
+			}
+			if v, _ := kindsGet(t, s, "hits"); v.Counter != tc.expect {
+				t.Errorf("hits, 1000 with %d and %d added by two transactions, is %d, want %d: an increment was lost", tc.by[0], tc.by[1], v.Counter, tc.expect)
+			}
+		})
+	}
+}
