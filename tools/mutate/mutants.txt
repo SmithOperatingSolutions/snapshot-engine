@@ -2083,3 +2083,19 @@ find: \tstack := []frame{{n: &n}}\n\tfor len(stack) > 0 {
 replace: \tvar rec func(*Node)\n\trec = func(m *Node) {\n\t\tif m.Kind != Array {\n\t\t\tb.WriteString(m.Number)\n\t\t\treturn\n\t\t}\n\t\tb.WriteByte('[')\n\t\tfor i := range m.Elems {\n\t\t\tif i > 0 {\n\t\t\t\tb.WriteByte(',')\n\t\t\t}\n\t\t\trec(&m.Elems[i])\n\t\t}\n\t\tb.WriteByte(']')\n\t}\n\tif n.Kind == Array {\n\t\trec(&n)\n\t\treturn\n\t}\n\tstack := []frame{{n: &n}}\n\tfor len(stack) > 0 {
 pkg: ./merge
 run: ^TestRegression_SE6_CanonicalTakesNoStackInProportionToDepth$
+
+# input bounds: locations have one spelling (#6's fuzz targets)
+
+id: kv-a-location-key-is-bounded
+file: model/kv/location.go
+find: key = r.LenBytes(MaxKeySize)
+replace: key = r.LenBytes(1 << 20)
+pkg: ./model/kv
+run: ^TestRegression_SE6_AKVLocationHasOneSpelling$
+
+id: kv-a-location-key-is-not-empty
+file: model/kv/location.go
+find: if err := r.Err(); err != nil || len(key) == 0 {
+replace: if err := r.Err(); err != nil {
+pkg: ./model/kv
+run: ^TestALocationNamesAKeyAndWhatIsBelowIt$

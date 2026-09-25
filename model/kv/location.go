@@ -3,6 +3,8 @@ package kv
 import (
 	"encoding/binary"
 	"fmt"
+
+	"github.com/SmithOperatingSolutions/snapshot-core/core/wire"
 )
 
 // Location is where a kv conflict is: uvarint(len(key)) · key · sub, sub
@@ -15,12 +17,14 @@ func Location(key, sub []byte) []byte {
 }
 
 // ParseLocation is Location's inverse: the key and what is below it. It
-// refuses a location that is not one: an empty key, a key length past the
-// end, a length that does not end.
+// refuses a location Location did not write, so a place has one spelling:
+// an empty key, a key over MaxKeySize, a key length past the end, one that
+// does not end or is not minimal.
 func ParseLocation(loc []byte) (key, sub []byte, err error) {
-	n, w := binary.Uvarint(loc) // n is 0 when the length is missing or does not end
-	if n == 0 || n > uint64(len(loc)-w) {
-		return nil, nil, fmt.Errorf("%w: a location whose key is %d bytes of %d", ErrKey, n, len(loc)-w)
+	r := wire.NewReader(loc)
+	key = r.LenBytes(MaxKeySize)
+	if err := r.Err(); err != nil || len(key) == 0 {
+		return nil, nil, fmt.Errorf("%w: a location whose key is not one (%d bytes, %v)", ErrKey, len(key), err)
 	}
-	return loc[w : w+int(n)], loc[w+int(n):], nil
+	return key, loc[len(loc)-r.Remaining():], nil
 }
