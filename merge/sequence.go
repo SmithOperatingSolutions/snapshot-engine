@@ -124,3 +124,7 @@ func align(base, side []string) []int {
 	}
 	return out
 }
+
+// MaxSequenceEdits is the most insertions and deletions Sequence aligns
+// between the base and either side.
+const MaxSequenceEdits = 1000
