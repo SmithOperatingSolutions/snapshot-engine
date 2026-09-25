@@ -31,6 +31,19 @@ repository, and they import only `engine/`.
 - `docs/PERFORMANCE.md`: the load tool, the baseline, and every performance
   change with its before and after figures.
 
+## Working knowledge
+
+[`MEMORY.md`](MEMORY.md) holds what the code and history don't:
+- how the owner works, including that every scope call is theirs, and that
+  nothing is pushed, merged or released without their word
+- pitfalls already paid for
+- tooling quirks
+
+Read it before your first change, and add to it when you learn something the
+next person would otherwise relearn. This file is the one to persist.
+Personal or tool-local memory is not: anything worth keeping goes here or in
+an issue.
+
 ## Where work is tracked
 
 GitHub issues on SmithOperatingSolutions/snapshot-engine. Every open question,
