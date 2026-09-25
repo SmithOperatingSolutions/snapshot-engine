@@ -37,6 +37,10 @@ var (
 	// ErrClosed is a call on a closed database, session or finished
 	// transaction.
 	ErrClosed = errors.New("engine: closed")
+	// ErrSessionLost is a write a collection reclaimed before it was
+	// published: the database refuses every further write until it is
+	// opened again, and the write must be done again there.
+	ErrSessionLost = errors.New("engine: session lost: garbage collection reclaimed unpublished writes; open the database again")
 	// ErrInUse is a branch another session is on.
 	ErrInUse = errors.New("engine: in use by another session")
 	// ErrInternal is a failure the caller can do nothing about (a store
