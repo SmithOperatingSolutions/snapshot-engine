@@ -872,35 +872,35 @@ file: engine/txn.go
 find: \t\tif hit {\n\t\t\treturn fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrSerialization)
 replace: \t\tif false {\n\t\t\treturn fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrSerialization)
 pkg: ./engine
-run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
+run: ^(TestARebaseMakesWhatTheMergeMakes|TestTransactionsWritingOneItemSerializeWhateverTheyWrote)$
 
 id: engine-txn-only-objects-this-transaction-modified-are-compared
 file: engine/txn.go
 find: \t\tif c.Kind == prolly.Modified && c.From.Model == c.To.Model {\n\t\t\tmine[c.Path] = c
 replace: \t\tif false {\n\t\t\tmine[c.Path] = c
 pkg: ./engine
-run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
+run: ^(TestARebaseMakesWhatTheMergeMakes|TestTransactionsWritingOneItemSerializeWhateverTheyWrote)$
 
 id: engine-txn-a-changed-cell-is-its-row
 file: engine/txn.go
 find: \t\tif c.To.Model == table.ID && mc.Kind == model.Modified && len(item) >= 2 {
 replace: \t\tif false {
 pkg: ./engine
-run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
+run: ^(TestARebaseMakesWhatTheMergeMakes|TestTransactionsWritingOneItemSerializeWhateverTheyWrote)$
 
 id: engine-txn-items-both-wrote-are-found
 file: engine/txn.go
 find: \t\thit = written[item]
 replace: \t\thit = false
 pkg: ./engine
-run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
+run: ^(TestARebaseMakesWhatTheMergeMakes|TestTransactionsWritingOneItemSerializeWhateverTheyWrote)$
 
 id: engine-txn-different-items-do-not-conflict
 file: engine/txn.go
 find: \t\thit = written[item]
 replace: \t\thit = true
 pkg: ./engine
-run: ^TestTransactionsWritingDifferentItemsAllCommit$
+run: ^(TestARebaseMakesWhatTheMergeMakes|TestTransactionsWritingDifferentItemsAllCommit)$
 
 id: engine-txn-a-schema-change-is-every-row
 file: engine/txn.go
@@ -2149,7 +2149,7 @@ file: engine/txn.go
 find: \tif err := t.writeWrite(ctx, ours, cur); err != nil {
 replace: \tif err := error(nil); err != nil {
 pkg: ./engine
-run: ^TestAMemberThatCollidesFailsAloneAndTheRestOfItsBatchCommits$
+run: ^(TestARebaseMakesWhatTheMergeMakes|TestAMemberThatCollidesFailsAloneAndTheRestOfItsBatchCommits)$
 
 id: engine-queue-a-lost-swap-rebuilds
 file: engine/queue.go

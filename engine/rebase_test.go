@@ -19,6 +19,7 @@ func rebasePeople() Schema {
 		Columns: []Column{
 			{Tag: 1, Name: "id", Type: table.TypeInt8},
 			{Tag: 2, Name: "name", Type: table.TypeText},
+			{Tag: 3, Name: "age", Type: table.TypeInt8, Nullable: true},
 		},
 		PrimaryKey: []Tag{1},
 	}
@@ -100,6 +101,16 @@ func setRow(id int64, name string) rebaseEdit {
 	}
 }
 
+func setAge(id int64, age int64) rebaseEdit {
+	return func(ctx context.Context, tx *Txn) error {
+		tb, err := tx.Table(ctx, "people")
+		if err != nil {
+			return err
+		}
+		return tb.Update(ctx, Key{id}, Row{1: id, 2: "p", 3: age})
+	}
+}
+
 func addRow(id int64) rebaseEdit {
 	return func(ctx context.Context, tx *Txn) error {
 		tb, err := tx.Table(ctx, "people")
@@ -137,7 +148,7 @@ func alterPeople(ctx context.Context, tx *Txn) error {
 		return err
 	}
 	next := rebasePeople()
-	next.Columns = append(next.Columns, Column{Tag: 3, Name: "note", Type: table.TypeText, Nullable: true})
+	next.Columns = append(next.Columns, Column{Tag: 4, Name: "note", Type: table.TypeText, Nullable: true})
 	return tb.Alter(ctx, next)
 }
 
@@ -188,6 +199,7 @@ func TestARebaseMakesWhatTheMergeMakes(t *testing.T) {
 		{"rows, keys and records, each side", all(setRow(1, "o"), addRow(900), setKey(3, "o"), setRecord(4, `{"n":2}`)), all(setRow(250, "c"), addRow(901), setKey(200, "c"), setRecord(5, `{"n":3}`)), true, false},
 		{"an object cur did not touch", setKey(1, "o"), setRow(7, "c"), true, false},
 		{"one row, the same value", setRow(1, "same"), setRow(1, "same"), true, true},
+		{"one row, different cells", setRow(1, "o"), setAge(1, 40), true, true},
 		{"one row added on both", addRow(900), addRow(900), true, true},
 		{"one key", setKey(9, "o"), setKey(9, "c"), true, true},
 		{"one record, different fields", setRecord(9, `{"n":1,"a":1}`), setRecord(9, `{"n":1,"b":1}`), true, true},
