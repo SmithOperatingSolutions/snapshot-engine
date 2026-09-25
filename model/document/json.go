@@ -9,8 +9,10 @@
 package document
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf16"
@@ -33,7 +35,11 @@ var ErrDocument = errors.New("document: not a document")
 
 // Parse reads one JSON value (RFC 8259) into a merge.Node: strings with every
 // escape, numbers as their canonical decimal text, objects with unique
-// fields sorted by name. Anything else is ErrDocument.
+// fields sorted by name. Anything else is ErrDocument, and so is a value
+// whose canonical text (Encode) would pass MaxDocument: that is counted as
+// the value is read, and a number's text measured before it is built, so a
+// document is refused before it grows past the limit (snapshot-engine#6).
+// Arrays and objects are allocated once, at the size their text shows.
 func Parse(text []byte) (merge.Node, error) {
 	if len(text) > MaxDocument {
 		return merge.Node{}, fmt.Errorf("%w: %d bytes, the limit is %d", ErrDocument, len(text), MaxDocument)
@@ -55,12 +61,53 @@ func Parse(text []byte) (merge.Node, error) {
 }
 
 type parser struct {
-	s []byte
-	i int
+	s   []byte
+	i   int
+	out int // bytes of canonical text the value read so far encodes to
 }
 
 func (p *parser) fail(what string) error {
 	return fmt.Errorf("%w: %s at byte %d", ErrDocument, what, p.i)
+}
+
+// emit counts n more bytes of canonical text and refuses the document once
+// its canonical text passes MaxDocument.
+func (p *parser) emit(n int) error {
+	if p.out += n; p.out > MaxDocument {
+		return p.fail(fmt.Sprintf("a document whose canonical text passes %d bytes", MaxDocument))
+	}
+	return nil
+}
+
+// members counts the values of the array or object whose first value
+// starts at p.i, by its top-level commas, so its slice is allocated once at
+// its size. The count comes from the text itself, so it costs no more than
+// the text; on text that is not JSON it is only a wrong size, and the parse
+// fails anyway.
+func (p *parser) members() int {
+	n, depth := 1, 0
+	for i := p.i; i < len(p.s); i++ {
+		switch p.s[i] {
+		case '"':
+			for i++; i < len(p.s) && p.s[i] != '"'; i++ {
+				if p.s[i] == '\\' {
+					i++
+				}
+			}
+		case '[', '{':
+			depth++
+		case ']', '}':
+			if depth == 0 {
+				return n
+			}
+			depth--
+		case ',':
+			if depth == 0 {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 func (p *parser) space() {
@@ -83,15 +130,15 @@ func (p *parser) value(depth int) (merge.Node, error) {
 		if err != nil {
 			return merge.Node{}, err
 		}
-		return merge.Str(s), nil
+		return merge.Str(s), p.emit(quotedLen(s))
 	case c == '-' || (c >= '0' && c <= '9'):
 		return p.number()
 	case p.literal("true"):
-		return merge.Boolean(true), nil
+		return merge.Boolean(true), p.emit(len("true"))
 	case p.literal("false"):
-		return merge.Boolean(false), nil
+		return merge.Boolean(false), p.emit(len("false"))
 	case p.literal("null"):
-		return merge.Node{Kind: merge.Null}, nil
+		return merge.Node{Kind: merge.Null}, p.emit(len("null"))
 	}
 	return merge.Node{}, p.fail("not a value")
 }
@@ -109,12 +156,14 @@ func (p *parser) object(depth int) (merge.Node, error) {
 		return merge.Node{}, p.fail(fmt.Sprintf("nested past %d levels", MaxDepth))
 	}
 	p.i++ // {
-	var fields []merge.Field
-	seen := map[string]bool{}
 	p.space()
 	if p.i < len(p.s) && p.s[p.i] == '}' {
 		p.i++
-		return merge.Obj(), nil
+		return merge.Obj(), p.emit(len("{}"))
+	}
+	fields := make([]merge.Field, 0, p.members())
+	if err := p.emit(1); err != nil { // the opening brace; each field counts its name, its colon, and the comma or closing brace after it
+		return merge.Node{}, err
 	}
 	for {
 		p.space()
@@ -125,10 +174,9 @@ func (p *parser) object(depth int) (merge.Node, error) {
 		if err != nil {
 			return merge.Node{}, err
 		}
-		if seen[name] {
-			return merge.Node{}, p.fail(fmt.Sprintf("the field %q twice in one object", name))
+		if err := p.emit(quotedLen(name) + len(":,")); err != nil {
+			return merge.Node{}, err
 		}
-		seen[name] = true
 		p.space()
 		if p.i >= len(p.s) || p.s[p.i] != ':' {
 			return merge.Node{}, p.fail("a colon is missing")
@@ -149,7 +197,13 @@ func (p *parser) object(depth int) (merge.Node, error) {
 			p.i++
 		case '}':
 			p.i++
-			return merge.Obj(fields...), nil
+			slices.SortFunc(fields, func(a, b merge.Field) int { return strings.Compare(a.Name, b.Name) })
+			for i := 1; i < len(fields); i++ {
+				if fields[i].Name == fields[i-1].Name {
+					return merge.Node{}, p.fail(fmt.Sprintf("the field %q twice in one object", fields[i].Name))
+				}
+			}
+			return merge.Node{Kind: merge.Object, Fields: fields}, nil
 		default:
 			return merge.Node{}, p.fail("a comma or a closing brace is missing")
 		}
@@ -161,11 +215,14 @@ func (p *parser) array(depth int) (merge.Node, error) {
 		return merge.Node{}, p.fail(fmt.Sprintf("nested past %d levels", MaxDepth))
 	}
 	p.i++ // [
-	var elems []merge.Node
 	p.space()
 	if p.i < len(p.s) && p.s[p.i] == ']' {
 		p.i++
-		return merge.Arr(), nil
+		return merge.Arr(), p.emit(len("[]"))
+	}
+	elems := make([]merge.Node, 0, p.members())
+	if err := p.emit(1); err != nil { // the opening bracket; each value counts the comma or closing bracket after it
+		return merge.Node{}, err
 	}
 	for {
 		p.space()
@@ -178,12 +235,15 @@ func (p *parser) array(depth int) (merge.Node, error) {
 		if p.i >= len(p.s) {
 			return merge.Node{}, p.fail("an array is not closed")
 		}
+		if err := p.emit(1); err != nil { // a comma or the closing bracket
+			return merge.Node{}, err
+		}
 		switch p.s[p.i] {
 		case ',':
 			p.i++
 		case ']':
 			p.i++
-			return merge.Arr(elems...), nil
+			return merge.Node{Kind: merge.Array, Elems: elems}, nil
 		default:
 			return merge.Node{}, p.fail("a comma or a closing bracket is missing")
 		}
@@ -275,7 +335,8 @@ func (p *parser) hex4() (rune, error) {
 	return rune(v), nil
 }
 
-// number reads a JSON number and returns it as its canonical text.
+// number reads a JSON number and returns it as its canonical text, whose
+// length is worked out from the digits and counted before it is built.
 func (p *parser) number() (merge.Node, error) {
 	start := p.i
 	neg := false
@@ -283,24 +344,24 @@ func (p *parser) number() (merge.Node, error) {
 		neg = true
 		p.i++
 	}
-	digits := func() string {
+	digits := func() []byte {
 		from := p.i
 		for p.i < len(p.s) && p.s[p.i] >= '0' && p.s[p.i] <= '9' {
 			p.i++
 		}
-		return string(p.s[from:p.i])
+		return p.s[from:p.i]
 	}
 	intPart := digits()
 	switch {
-	case intPart == "":
+	case len(intPart) == 0:
 		return merge.Node{}, p.fail("a number without digits")
 	case len(intPart) > 1 && intPart[0] == '0':
 		return merge.Node{}, p.fail("a number with a leading zero")
 	}
-	frac := ""
+	var frac []byte
 	if p.i < len(p.s) && p.s[p.i] == '.' {
 		p.i++
-		if frac = digits(); frac == "" {
+		if frac = digits(); len(frac) == 0 {
 			return merge.Node{}, p.fail("a number with no digits after the point")
 		}
 	}
@@ -313,65 +374,120 @@ func (p *parser) number() (merge.Node, error) {
 			p.i++
 		}
 		e := digits()
-		if e == "" {
+		if len(e) == 0 {
 			return merge.Node{}, p.fail("an exponent without digits")
 		}
-		if len(strings.TrimLeft(e, "0")) > 6 {
+		if e = bytes.TrimLeft(e, "0"); len(e) > 6 {
 			return merge.Node{}, p.fail("an exponent past the limit")
 		}
-		exp, _ = strconv.Atoi(e)
+		for _, c := range e {
+			exp = exp*10 + int(c-'0')
+		}
 		if expNeg {
 			exp = -exp
 		}
 	}
-	text, ok := canonicalNumber(neg, intPart, frac, exp)
+	d := decimalOf(intPart, frac, exp)
+	n, ok := d.textLen(neg)
 	if !ok {
 		p.i = start
 		return merge.Node{}, p.fail(fmt.Sprintf("a number past %d digits", MaxNumberDigits))
 	}
-	return merge.Num(text), nil
+	if err := p.emit(n); err != nil {
+		return merge.Node{}, err
+	}
+	return merge.Num(d.text(neg, n)), nil
 }
 
-// canonicalNumber is the one spelling of a decimal: no exponent, no
+// decimal is a number as written, its digits intPart then frac, with where
+// its significant digits are and where its point falls among them.
+type decimal struct {
+	intPart, frac []byte
+	lead, sig     int // leading zeros, then significant digits (0 for zero)
+	point         int // digits before the point, from the first significant one
+}
+
+func decimalOf(intPart, frac []byte, exp int) decimal {
+	d := decimal{intPart: intPart, frac: frac}
+	total := len(intPart) + len(frac)
+	for d.lead < total && d.digit(d.lead) == '0' {
+		d.lead++
+	}
+	end := total
+	for end > d.lead && d.digit(end-1) == '0' {
+		end--
+	}
+	d.sig = end - d.lead
+	d.point = len(intPart) + exp - d.lead
+	return d
+}
+
+func (d decimal) digit(i int) byte {
+	if i < len(d.intPart) {
+		return d.intPart[i]
+	}
+	return d.frac[i-len(d.intPart)]
+}
+
+// textLen is the length of the decimal's one spelling: no exponent, no
 // leading zeros but the one before a point, no trailing zeros after it,
 // zero as "0"; false when it would take more than MaxNumberDigits digits on
 // either side of the point.
-func canonicalNumber(neg bool, intPart, frac string, exp int) (string, bool) {
-	all := intPart + frac
-	point := len(intPart) + exp // digits before the point
-	trimmed := strings.TrimLeft(all, "0")
-	point -= len(all) - len(trimmed)
-	all = strings.TrimRight(trimmed, "0")
-	if all == "" {
-		return "0", true
+func (d decimal) textLen(neg bool) (int, bool) {
+	if d.sig == 0 {
+		return 1, true
 	}
-	intDigits, fracDigits := point, len(all)-point
-	if point <= 0 {
-		intDigits, fracDigits = 1, len(all)-point
-	} else if point >= len(all) {
+	intDigits, fracDigits := d.point, d.sig-d.point
+	if d.point <= 0 {
+		intDigits = 1
+	} else if d.point >= d.sig {
 		fracDigits = 0
 	}
 	if intDigits > MaxNumberDigits || fracDigits > MaxNumberDigits {
-		return "", false
+		return 0, false
 	}
-	var b strings.Builder
+	n := intDigits + fracDigits
+	if fracDigits > 0 {
+		n++ // the point
+	}
 	if neg {
-		b.WriteByte('-')
+		n++
+	}
+	return n, true
+}
+
+// text builds the spelling textLen measured, n bytes of it.
+func (d decimal) text(neg bool, n int) string {
+	if d.sig == 0 {
+		return "0"
+	}
+	b := make([]byte, 0, n)
+	if neg {
+		b = append(b, '-')
+	}
+	sig := func(from, to int) {
+		for i := from; i < to; i++ {
+			b = append(b, d.digit(d.lead+i))
+		}
 	}
 	switch {
-	case point <= 0:
-		b.WriteString("0.")
-		b.WriteString(strings.Repeat("0", -point))
-		b.WriteString(all)
-	case point >= len(all):
-		b.WriteString(all)
-		b.WriteString(strings.Repeat("0", point-len(all)))
+	case d.point <= 0:
+		b = append(b, '0', '.')
+		for range -d.point {
+			b = append(b, '0')
+		}
+		sig(0, d.sig)
+	case d.point >= d.sig:
+		sig(0, d.sig)
+		for range d.point - d.sig {
+			b = append(b, '0')
+		}
 	default:
-		b.WriteString(all[:point])
-		b.WriteByte('.')
-		b.WriteString(all[point:])
+		sig(0, d.point)
+		b = append(b, '.')
+		sig(d.point, d.sig)
 	}
-	return b.String(), true
+	return string(b)
 }
 
 // Encode is the canonical JSON text of a node: fields in the node's order,
@@ -417,6 +533,22 @@ func encode(b []byte, n merge.Node) []byte {
 }
 
 const hexDigits = "0123456789abcdef"
+
+// quotedLen is the length appendString gives s.
+func quotedLen(s string) int {
+	n := 2
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '"' || c == '\\' || c == '\b' || c == '\f' || c == '\n' || c == '\r' || c == '\t':
+			n += 2
+		case c < 0x20:
+			n += 6
+		default:
+			n++
+		}
+	}
+	return n
+}
 
 func appendString(b []byte, s string) []byte {
 	b = append(b, '"')

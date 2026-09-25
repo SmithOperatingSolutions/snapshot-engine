@@ -2009,3 +2009,40 @@ find: const MaxSequenceEdits = 1000
 replace: const MaxSequenceEdits = 100000
 pkg: ./model/document
 run: ^TestRegression_SE4_AnArrayPastTheEditBudgetConflictsAtItsField$
+
+# input bounds: document parse memory (#6)
+
+id: document-parse-counts-the-canonical-text
+file: model/document/json.go
+find: if p.out += n; p.out > MaxDocument {
+replace: if p.out += n; false {
+pkg: ./model/document
+run: ^TestRegression_SE6_ADocumentPastTheLimitOnceCanonicalIsRefusedAsItIsParsed$
+
+id: document-parse-counts-each-comma-of-an-array
+file: model/document/json.go
+find: if err := p.emit(1); err != nil { // a comma or the closing bracket
+replace: if err := p.emit(0); err != nil { // a comma or the closing bracket
+pkg: ./model/document
+run: ^TestRegression_SE6_ADocumentPastTheLimitOnceCanonicalIsRefusedAsItIsParsed$
+
+id: document-quoted-length-counts-both-quotes
+file: model/document/json.go
+find: \tn := 2\n\tfor i := 0; i < len(s); i++ {
+replace: \tn := 1\n\tfor i := 0; i < len(s); i++ {
+pkg: ./model/document
+run: ^TestRegression_SE6_ADocumentPastTheLimitOnceCanonicalIsRefusedAsItIsParsed$
+
+id: document-parse-sizes-an-array-from-its-text
+file: model/document/json.go
+find: elems := make([]merge.Node, 0, p.members())
+replace: var elems []merge.Node
+pkg: ./model/document
+run: ^TestRegression_SE6_ParsingCostsMemoryInProportionToTheText$
+
+id: document-parse-sizes-an-object-from-its-text
+file: model/document/json.go
+find: fields := make([]merge.Field, 0, p.members())
+replace: var fields []merge.Field
+pkg: ./model/document
+run: ^TestRegression_SE6_ParsingCostsMemoryInProportionToTheText$
