@@ -141,6 +141,19 @@ func alterPeople(ctx context.Context, tx *Txn) error {
 	return tb.Alter(ctx, next)
 }
 
+func dropPeople(ctx context.Context, tx *Txn) error {
+	return tx.Drop(ctx, "people")
+}
+
+// peopleAsKV drops the table people and makes a kv map of the name.
+func peopleAsKV(ctx context.Context, tx *Txn) error {
+	if err := tx.Drop(ctx, "people"); err != nil {
+		return err
+	}
+	_, err := tx.CreateKV(ctx, "people")
+	return err
+}
+
 func createNotes(ctx context.Context, tx *Txn) error {
 	_, err := tx.CreateTable(ctx, "notes", rebasePeople())
 	return err
@@ -162,7 +175,7 @@ func all(edits ...rebaseEdit) rebaseEdit {
 // takes: rows, keys and records changed on either side, objects only one
 // side touched; an item both changed is ErrSerialization from either. A
 // change the rebase does not take (a schema changed on either side, an
-// object created) is left to the merge, which still decides it.
+// object created or dropped) is left to the merge, which still decides it.
 func TestARebaseMakesWhatTheMergeMakes(t *testing.T) {
 	ctx := context.Background()
 	for _, c := range []struct {
@@ -181,6 +194,10 @@ func TestARebaseMakesWhatTheMergeMakes(t *testing.T) {
 		{"a schema changed by cur", setRow(1, "o"), alterPeople, false, true},
 		{"a schema changed by ours", alterPeople, setRow(1, "c"), false, true},
 		{"an object created", createNotes, setRow(1, "c"), false, false},
+		{"an object dropped by cur", setRow(1, "o"), dropPeople, false, true},
+		{"an object dropped by ours", dropPeople, setRow(1, "c"), false, true},
+		{"an object changed in kind by ours", peopleAsKV, setRow(1, "c"), false, true},
+		{"an object changed in kind by cur", setRow(1, "o"), peopleAsKV, false, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			db, s := rebaseFixture(t)
@@ -217,6 +234,9 @@ func TestARebaseMakesWhatTheMergeMakes(t *testing.T) {
 				t.Fatalf("the merge = %v, want serialization: %v (the fixture is not the case it names)", mergeErr, c.serializes)
 			}
 			if !took {
+				if rebaseErr != nil {
+					t.Fatalf("the rebase declined the change with %v: a change it does not take is the merge's to decide, not a failed commit", rebaseErr)
+				}
 				return
 			}
 			switch {
