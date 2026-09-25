@@ -85,3 +85,69 @@ func asNumeric(v any) table.Numeric {
 	n, _ := v.(table.Numeric)
 	return n
 }
+
+// A numeric a client writes is text, and its exponent says how long its
+// canonical text is. One asking for more text than a numeric may have is
+// refused, from the arithmetic, before any text is built: "1e1000000000",
+// twelve bytes, built a gigabyte of zeros and allocated 5.4 GB before the
+// write refused it, and an exponent near the largest integer wrapped
+// around to a different value (snapshot-engine#3).
+func TestRegression_SE3_AWrittenNumericCannotAskForUnboundedText(t *testing.T) {
+	col := table.Column{Tag: 1, Name: "amount", Type: table.TypeNumeric}
+	big := "1" + strings.Repeat("0", table.MaxNumericLen-1)
+	small := "-0." + strings.Repeat("0", table.MaxNumericLen-4) + "1"
+
+	// Positive controls: the longest numerics there are, spelled with an
+	// exponent, parse to their thousand bytes of text and are written.
+	for _, c := range []struct{ in, want string }{
+		{"1e999", big},
+		{"0.001e1002", big},
+		{"-1e-997", small},
+		{small, small},
+		{"0e999999", "0"}, // the largest exponent read
+	} {
+		got, err := table.ParseNumeric(c.in)
+		if err != nil || string(got) != c.want {
+			t.Fatalf("ParseNumeric(%q) = %.20q… (%d bytes), %v: want the %d-byte numeric it spells, the most a numeric may have", c.in, got, len(got), err, len(c.want))
+		}
+		if _, err := table.EncodeCell(col, got); err != nil {
+			t.Fatalf("writing the %d-byte numeric %q… is refused: %v", len(got), got[:10], err)
+		}
+	}
+
+	for _, in := range []string{
+		"1e1000",                // one byte of text too many
+		"-1e-998",               // one byte too many, after the point
+		"1e999999",              // the largest exponent: a million zeros
+		"1e-999999",             // a million zeros after the point
+		"1e1000000",             // an exponent past the largest
+		"0e1000000",             // past the largest, even for zero
+		"1e9223372036854775807", // an exponent that wraps around
+	} {
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		got, err := table.ParseNumeric(in)
+		runtime.ReadMemStats(&after)
+		if !errors.Is(err, table.ErrValue) {
+			t.Errorf("ParseNumeric(%q) = %.20q… (%d bytes), %v: a client's numeric past a numeric's limits was taken for a value, where the write must refuse it", in, got, len(got), err)
+		}
+		if grew := after.TotalAlloc - before.TotalAlloc; grew > 1<<20 {
+			t.Errorf("parsing the %d-byte numeric %q allocated %d bytes: one written value costs memory without bound", len(in), in, grew)
+		}
+	}
+
+	// Writing a numeric that is not canonical is refused, and refused as
+	// cheaply: the text it would take is worked out, not built.
+	for _, in := range []string{"1e999999", "-1e-999999", "1e1000000", "1e9223372036854775807"} {
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		_, err := table.EncodeCell(col, table.Numeric(in))
+		runtime.ReadMemStats(&after)
+		if !errors.Is(err, table.ErrValue) {
+			t.Errorf("writing the numeric %q: %v, want ErrValue", in, err)
+		}
+		if grew := after.TotalAlloc - before.TotalAlloc; grew > 1<<20 {
+			t.Errorf("refusing to write the %d-byte numeric %q allocated %d bytes: one insert costs memory without bound", len(in), in, grew)
+		}
+	}
+}

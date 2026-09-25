@@ -440,3 +440,40 @@ func FuzzDecodeCell(f *testing.F) {
 		}
 	})
 }
+
+// FuzzParseNumeric feeds a numeric's text as a client writes it both to
+// ParseNumeric and, as it stands, to the cell encoder. Whatever parses is
+// canonical, at most MaxNumericLen bytes, is written and reads back; what
+// the encoder takes is exactly the canonical text (snapshot-engine#3).
+func FuzzParseNumeric(f *testing.F) {
+	for _, s := range []string{"0", "-0", "01", "1.50", "2e3", "-2.5E-3", "1e999", "1e1000", "-1e-997", "-1e-998", ".5", "5.", "1e", "1e+2", "-", ""} {
+		f.Add(s)
+	}
+	col := table.Column{Tag: 1, Name: "amount", Type: table.TypeNumeric}
+	f.Fuzz(func(t *testing.T, s string) {
+		if cell, err := table.EncodeCell(col, table.Numeric(s)); err == nil {
+			if n, err := table.ParseNumeric(s); err != nil || string(n) != s {
+				t.Fatalf("the numeric %q was written as it stands, but its canonical text is %q (%v)", s, n, err)
+			}
+			if v, rest, err := table.DecodeCell(cell, col); err != nil || len(rest) != 0 || v != table.Numeric(s) {
+				t.Fatalf("the numeric %q was written but reads back as %v, %v", s, v, err)
+			}
+		}
+		n, err := table.ParseNumeric(s)
+		if err != nil {
+			if !errors.Is(err, table.ErrValue) {
+				t.Fatalf("ParseNumeric(%q): %v, want ErrValue", s, err)
+			}
+			return
+		}
+		if len(n) > table.MaxNumericLen {
+			t.Fatalf("ParseNumeric(%q) is %d bytes of text, over MaxNumericLen", s, len(n))
+		}
+		if again, err := table.ParseNumeric(string(n)); err != nil || again != n {
+			t.Fatalf("the canonical text %q of %q parses as %q, %v", n, s, again, err)
+		}
+		if _, err := table.EncodeCell(col, n); err != nil {
+			t.Fatalf("the canonical numeric %q of %q is refused: %v", n, s, err)
+		}
+	})
+}
