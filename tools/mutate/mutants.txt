@@ -1965,3 +1965,10 @@ find: return min(n, r.Remaining()/size)
 replace: return n
 pkg: ./model/kv
 run: ^TestRegression_SE5_AFrameSizesNothingFromItsClaimedCount$
+
+id: document-read-sizes-nothing-from-the-roots-claim
+file: model/document/document.go
+find: out := map[string]merge.Node{} // grown as records are read
+replace: out := make(map[string]merge.Node, col.m.Count()) // grown as records are read
+pkg: ./model/document
+run: ^TestRegression_SE5_ReadingACollectionSizesNothingFromItsRootsClaim$

@@ -109,7 +109,7 @@ func Read(ctx context.Context, r chunk.Reader, c prolly.Config, root model.Root)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]merge.Node, col.m.Count())
+	out := map[string]merge.Node{} // grown as records are read, never sized from the root's claim (snapshot-engine#5)
 	for {
 		id, n, ok, err := it.Next()
 		if err != nil {
