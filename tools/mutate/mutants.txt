@@ -1949,3 +1949,19 @@ find: if (len(digits) > 0 && canonicalLen(neg, len(digits), exp) != len(n)) || c
 replace: if canonical(neg, digits, exp) != n {
 pkg: ./model/table
 run: ^TestRegression_SE3_AWrittenNumericCannotAskForUnboundedText$
+
+# input bounds: sizes from claimed counts (#5)
+
+id: kv-read-sizes-nothing-from-the-roots-claim
+file: model/kv/kv.go
+find: out := map[string]Value{} // grown as entries are read
+replace: out := make(map[string]Value, m.m.Count()) // grown as entries are read
+pkg: ./model/kv
+run: ^TestRegression_SE5_ReadingAnObjectSizesNothingFromItsRootsClaim$
+
+id: kv-a-frame-sizes-for-the-bytes-behind-its-count
+file: model/kv/value.go
+find: return min(n, r.Remaining()/size)
+replace: return n
+pkg: ./model/kv
+run: ^TestRegression_SE5_AFrameSizesNothingFromItsClaimedCount$

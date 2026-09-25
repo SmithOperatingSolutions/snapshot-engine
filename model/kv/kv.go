@@ -95,7 +95,7 @@ func Read(ctx context.Context, r chunk.Reader, c prolly.Config, root model.Root)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]Value, m.m.Count())
+	out := map[string]Value{} // grown as entries are read, never sized from the root's claim (snapshot-engine#5)
 	for {
 		k, v, ok, err := it.Next()
 		if err != nil {

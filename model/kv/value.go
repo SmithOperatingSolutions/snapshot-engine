@@ -177,7 +177,7 @@ func DecodeValue(b []byte) (Value, error) {
 		if err != nil {
 			return Value{}, err
 		}
-		v.Members = make([]Member, 0, n)
+		v.Members = make([]Member, 0, held(r, n, 9))
 		for i := 0; i < n; i++ {
 			m := Member{Tag: r.U64(), Elem: bytes.Clone(r.LenBytes(MaxMember))}
 			if r.Err() != nil {
@@ -193,7 +193,7 @@ func DecodeValue(b []byte) (Value, error) {
 		if err != nil {
 			return Value{}, err
 		}
-		v.Fields = make(map[string][]byte, n)
+		v.Fields = make(map[string][]byte, held(r, n, 2))
 		var last string
 		for i := 0; i < n; i++ {
 			name := string(r.LenBytes(MaxMember))
@@ -211,7 +211,7 @@ func DecodeValue(b []byte) (Value, error) {
 		if err != nil {
 			return Value{}, err
 		}
-		v.Scores = make([]Scored, 0, n)
+		v.Scores = make([]Scored, 0, held(r, n, 17))
 		for i := 0; i < n; i++ {
 			bits := r.U64()
 			s := Scored{Score: math.Float64frombits(bits), Tag: r.U64(), Member: bytes.Clone(r.LenBytes(MaxMember))}
@@ -231,7 +231,7 @@ func DecodeValue(b []byte) (Value, error) {
 		if err != nil {
 			return Value{}, err
 		}
-		v.Seq = make([][]byte, 0, n)
+		v.Seq = make([][]byte, 0, held(r, n, 1))
 		for i := 0; i < n; i++ {
 			e := bytes.Clone(r.LenBytes(MaxMember))
 			if r.Err() != nil {
@@ -258,6 +258,14 @@ func count(r *wire.Reader) (int, error) {
 		return 0, fmt.Errorf("%w: %d members, limit %d", ErrValue, n, MaxMembers)
 	}
 	return int(n), nil
+}
+
+// held is how many of the n items a frame claims its remaining bytes can
+// hold, each taking at least size bytes: what a decoder sizes for, so a
+// claimed count costs no more memory than the bytes behind it
+// (snapshot-engine#5).
+func held(r *wire.Reader, n, size int) int {
+	return min(n, r.Remaining()/size)
 }
 
 func checkCount(n int) error {
