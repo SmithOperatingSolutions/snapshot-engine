@@ -24,6 +24,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/SmithOperatingSolutions/snapshot-engine/engine"
@@ -221,6 +222,25 @@ type suite struct {
 	loaded  map[string]bool
 	log     *causes
 	seen    causeCounts // the causes counted up to the last result
+	blobs   *countingBlobs
+	swapped uint64 // root swaps counted up to the last result
+}
+
+// countingBlobs is the backend with its root swaps counted: every commit,
+// session commit and merge that lands publishes by swapping the root, so
+// swaps per transaction says how many transactions share a publish.
+type countingBlobs struct {
+	engine.Blobs
+	swaps atomic.Uint64
+}
+
+// SwapRoot counts a swap that landed.
+func (b *countingBlobs) SwapRoot(ctx context.Context, expected engine.BlobVersion, next []byte) (engine.BlobVersion, error) {
+	v, err := b.Blobs.SwapRoot(ctx, expected, next)
+	if err == nil {
+		b.swaps.Add(1)
+	}
+	return v, err
 }
 
 func runSuite(c config, sc scale, backend string, rep *report) (err error) {
@@ -253,6 +273,8 @@ func runSuite(c config, sc scale, backend string, rep *report) (err error) {
 	case "mem":
 		s.o.Blobs = engine.MemoryBlobs()
 	}
+	s.blobs = &countingBlobs{Blobs: s.o.Blobs}
+	s.o.Blobs = s.blobs
 	if s.db, err = engine.Create(ctx, me, s.o); err != nil {
 		return err
 	}
@@ -324,6 +346,9 @@ func (s *suite) record(r result) {
 		r.note += fmt.Sprintf(" [%d other failures logged, first: %s]", other, s.log.firstOther)
 	}
 	s.seen = now
+	swapped := s.blobs.swaps.Load()
+	r.swaps = swapped - s.swapped
+	s.swapped = swapped
 	r.disk = s.diskBytes()
 	runtime.GC()
 	var m runtime.MemStats

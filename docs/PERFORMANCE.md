@@ -159,8 +159,11 @@ attempt so far); commit p50 is the last attempt's `Commit` alone;
 "serialization failures (lost swaps)" counts every `ErrSerialization`,
 and in brackets how many the engine logged as a lost swap rather than a
 conflict (the bench reads the details from the database's `Logger`);
-"gave up" is a transaction that failed 50 attempts; disk and heap are
-measured after the phase, the heap after a GC.
+"gave up" is a transaction that failed 50 attempts; "swaps" counts the
+root swaps that landed during the phase (the bench wraps the backend and
+counts `SwapRoot`), and "sw/op" is swaps per operation: 1 when every
+transaction publishes alone; disk and heap are measured after the phase,
+the heap after a GC.
 
 ### The workloads at full scale
 

@@ -96,6 +96,7 @@ type result struct {
 	retries, serial, gaveUp  uint64
 	lost                     uint64 // serialization failures that were lost swaps, not conflicts
 	errors                   uint64
+	swaps                    uint64 // root swaps that landed during the phase
 	firstErr                 string
 	disk                     int64 // bytes on disk after the phase; -1 when not on disk
 	heap                     uint64
@@ -107,6 +108,15 @@ func (r result) rate() float64 {
 		return 0
 	}
 	return float64(r.ops) / r.dur.Seconds()
+}
+
+// swapsPerOp is root swaps per operation: 1 when every transaction
+// publishes alone, less when transactions share a publish.
+func (r result) swapsPerOp() string {
+	if r.ops == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.3f", float64(r.swaps)/float64(r.ops))
 }
 
 func (r result) mbps() string {
@@ -143,14 +153,15 @@ func (r result) line() string {
 	if r.commit != nil {
 		c50, c99 = r.commit.quantile(.50), r.commit.quantile(.99)
 	}
-	return fmt.Sprintf("%-4s %-40s %10d %-7s %10.1f %8s | %8s %8s %8s %9s | %8s %8s | %6d %6d %6d %4d %5d | %7s %7s %s",
+	return fmt.Sprintf("%-4s %-40s %10d %-7s %10.1f %8s | %8s %8s %8s %9s | %8s %8s | %6d %6d %6d %4d %5d | %7d %6s | %7s %7s %s",
 		r.workload, r.phase, r.ops, r.unit, r.rate(), r.mbps(),
 		ms(p50), ms(p95), ms(p99), ms(max), ms(c50), ms(c99),
 		r.retries, r.serial, r.lost, r.gaveUp, r.errors,
+		r.swaps, r.swapsPerOp(),
 		mib(r.disk), fmt.Sprintf("%.0f", float64(r.heap)/(1<<20)), r.note)
 }
 
-const header = "W    phase                                           ops unit          op/s     MB/s |   p50 ms   p95 ms   p99 ms    max ms |   c50 ms   c99 ms |  retry serial   lost gave   err | diskMiB heapMiB note"
+const header = "W    phase                                           ops unit          op/s     MB/s |   p50 ms   p95 ms   p99 ms    max ms |   c50 ms   c99 ms |  retry serial   lost gave   err |   swaps  sw/op | diskMiB heapMiB note"
 
 // report collects results and prints them.
 type report struct {

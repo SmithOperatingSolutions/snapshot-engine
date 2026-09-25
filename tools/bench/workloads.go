@@ -302,6 +302,7 @@ func (s *suite) parallel(conc int, dur time.Duration, f func(sess *engine.Sessio
 		}
 	}
 	var wg sync.WaitGroup
+	s.swapped = s.blobs.swaps.Load() // the phase's swaps are its own, not the load's before it
 	start := time.Now()
 	deadline := start.Add(dur)
 	for i := 0; i < conc; i++ {
