@@ -347,12 +347,25 @@ func (t *Txn) Commit(ctx context.Context) (err error) {
 }
 
 // onto is the namespace the transaction makes of cur: its own when cur is
-// its snapshot, else ours merged with cur through the models (merged).
+// its snapshot, else its changes rebased onto cur (rebase) or, where a
+// rebase cannot take them, ours merged with cur through the models
+// (merged).
 func (t *Txn) onto(ctx context.Context, ours, cur *object.Namespace) (*object.Namespace, error) {
 	if cur.Root() == t.base.Root() {
 		return ours, nil
 	}
+	if next, ok, err := t.rebase(ctx, ours, cur); err != nil || ok {
+		return next, err
+	}
 	return t.merged(ctx, ours, cur)
+}
+
+// rebase applies the transaction's changes to cur at the cost of those
+// changes, not of what landed in cur since the snapshot (DESIGN D20). It
+// reports false, leaving the decision to merged, for a change it does not
+// take. Stub: it takes nothing.
+func (t *Txn) rebase(ctx context.Context, ours, cur *object.Namespace) (*object.Namespace, bool, error) {
+	return nil, false, nil
 }
 
 // merged is ours merged with cur through the models, refused
