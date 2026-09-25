@@ -85,6 +85,7 @@ func TestWhatIsNotADocumentIsRefused(t *testing.T) {
 		"a comment":                            `{"a": 1 /* c */}`,
 		"too deep":                             deep,
 		"too big":                              big,
+		"too big, most of it whitespace":       `"x"` + strings.Repeat(" ", document.MaxDocument),
 		"a number with too many digits":        `1e1001`,
 		"a number with too many places":        `1e-1001`,
 	} {
