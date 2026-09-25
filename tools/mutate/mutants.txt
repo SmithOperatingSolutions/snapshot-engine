@@ -394,8 +394,8 @@ run: ^TestWhatIsNotADocumentIsRefused$
 
 id: document-parse-refuses-a-field-twice
 file: model/document/json.go
-find: if seen[name] {
-replace: if seen[name] && false {
+find: if fields[i].Name == fields[i-1].Name {
+replace: if fields[i].Name == fields[i-1].Name && false {
 pkg: ./model/document
 run: ^TestWhatIsNotADocumentIsRefused$
 
@@ -422,8 +422,8 @@ run: ^TestWhatIsNotADocumentIsRefused$
 
 id: document-numbers-drop-trailing-zeros
 file: model/document/json.go
-find: all = strings.TrimRight(trimmed, "0")
-replace: all = trimmed
+find: for end > d.lead && d.digit(end-1) == '0' {
+replace: for end > d.lead && false {
 pkg: ./model/document
 run: ^TestJSONParsesToOneCanonicalText$
 
@@ -684,14 +684,7 @@ run: ^TestMergeIsThreeWayPerKey$
 id: kv-location-prefixes-the-key-length
 file: model/kv/location.go
 find: out := binary.AppendUvarint(make([]byte, 0, binary.MaxVarintLen64+len(key)+len(sub)), uint64(len(key)))
-replace: out := make([]byte, 0, len(key)+len(sub))
-pkg: ./model/kv
-run: ^TestALocationNamesAKeyAndWhatIsBelowIt$
-
-id: kv-location-refuses-a-bad-key-length
-file: model/kv/location.go
-find: if n == 0 || n > uint64(len(loc)-w) {
-replace: if n > uint64(len(loc)-w) {
+replace: out := binary.AppendUvarint(make([]byte, 0, len(key)+len(sub)), 0)[:0]
 pkg: ./model/kv
 run: ^TestALocationNamesAKeyAndWhatIsBelowIt$
 
