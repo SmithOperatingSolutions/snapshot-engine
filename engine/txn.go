@@ -8,6 +8,7 @@ import (
 	"github.com/SmithOperatingSolutions/snapshot-core/core/merge"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/model"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/object"
+	"github.com/SmithOperatingSolutions/snapshot-core/core/prolly"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/vcs"
 
 	"github.com/SmithOperatingSolutions/snapshot-engine/model/document"
@@ -355,6 +356,9 @@ func (t *Txn) Commit(ctx context.Context) (err error) {
 			if err != nil {
 				return translate(err)
 			}
+			if err := t.writeWrite(ctx, ours, theirs); err != nil {
+				return err
+			}
 			res, err := merge.Merge(ctx, t.s.db.models.registry, t.base, ours, theirs, r.Chunks(), merge.Options{})
 			if errors.Is(err, merge.ErrTooManyConflicts) {
 				return fmt.Errorf("%w (%w)", ErrSerialization, err)
@@ -377,6 +381,120 @@ func (t *Txn) Commit(ctx context.Context) (err error) {
 		}
 	}
 	return fmt.Errorf("%w: the working set moved under %d attempts in a row", ErrSerialization, maxCommitAttempts)
+}
+
+// writeWrite is ErrSerialization when ours and theirs, each against the
+// transaction's snapshot, wrote one item: a table row, a kv key, a document
+// record (the objects a transaction writes). A transaction is the
+// one writer of an item until it commits (DESIGN D17), so a merge never
+// decides between two writes of one item, even two the same: each was a
+// write, and an application that read the item for either would lose the
+// other. Objects added, deleted or changed to another model on either side
+// are the merge's to refuse.
+func (t *Txn) writeWrite(ctx context.Context, ours, theirs *object.Namespace) error {
+	od, err := object.Diff(ctx, t.base, ours)
+	if err != nil {
+		return translate(err)
+	}
+	mine := map[string]object.Change{}
+	for {
+		c, ok, err := od.Next()
+		if err != nil {
+			return translate(err)
+		}
+		if !ok {
+			break
+		}
+		if c.Kind == prolly.Modified && c.From.Model == c.To.Model {
+			mine[c.Path] = c
+		}
+	}
+	if len(mine) == 0 {
+		return nil
+	}
+	td, err := object.Diff(ctx, t.base, theirs)
+	if err != nil {
+		return translate(err)
+	}
+	for {
+		c, ok, err := td.Next()
+		if err != nil {
+			return translate(err)
+		}
+		if !ok {
+			return nil
+		}
+		m, both := mine[c.Path]
+		if !both || c.Kind != prolly.Modified || c.To.Model != m.To.Model {
+			continue
+		}
+		written, whole, err := items(ctx, od, m)
+		if err != nil {
+			return err
+		}
+		hit := whole
+		if !hit {
+			if hit, err = anyItem(ctx, td, c, written); err != nil {
+				return err
+			}
+		}
+		if hit {
+			return fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrSerialization)
+		}
+	}
+}
+
+// items is every item a modified object's change wrote, or whole when it
+// wrote the object as one item.
+func items(ctx context.Context, d *object.DiffIter, c object.Change) (written map[string]bool, whole bool, err error) {
+	written = map[string]bool{}
+	whole, err = eachItem(ctx, d, c, func(item string) bool {
+		written[item] = true
+		return true
+	})
+	return written, whole, err
+}
+
+// anyItem reports whether a modified object's change wrote any of written,
+// or the object as one item.
+func anyItem(ctx context.Context, d *object.DiffIter, c object.Change, written map[string]bool) (bool, error) {
+	hit := false
+	whole, err := eachItem(ctx, d, c, func(item string) bool {
+		hit = written[item]
+		return !hit
+	})
+	return hit || whole, err
+}
+
+// eachItem calls each for the item of every change the object's model
+// reports, until each returns false: a table's row (a changed cell's
+// location is the row's, then the column's tag: table.Locate), a kv key or
+// a record's id (their locations). It reports whole instead, calling each
+// for nothing, for a table whose schema changed: every row of it.
+func eachItem(ctx context.Context, d *object.DiffIter, c object.Change, each func(item string) bool) (whole bool, err error) {
+	it, err := d.Detail(ctx, c)
+	if errors.Is(err, table.ErrSchema) {
+		return true, nil
+	}
+	if err != nil {
+		return false, translate(err)
+	}
+	for {
+		mc, ok, err := it.Next(ctx)
+		if err != nil {
+			return false, translate(err)
+		}
+		if !ok {
+			return false, nil
+		}
+		item := mc.Location
+		if c.To.Model == table.ID && mc.Kind == model.Modified && len(item) >= 2 {
+			item = item[:len(item)-2] // a cell's location: the row's, then the column's tag
+		}
+		if !each(string(item)) {
+			return false, nil
+		}
+	}
 }
 
 // Rollback discards the transaction.

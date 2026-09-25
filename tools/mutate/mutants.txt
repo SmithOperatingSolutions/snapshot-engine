@@ -874,6 +874,34 @@ pkg: ./model/document
 run: ^TestACollectionRefusesWhatIsNotOurs$
 
 # engine txn
+id: engine-txn-an-item-written-on-both-sides-serializes
+file: engine/txn.go
+find: \t\tif hit {\n\t\t\treturn fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrSerialization)
+replace: \t\tif false {\n\t\t\treturn fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrSerialization)
+pkg: ./engine
+run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
+
+id: engine-txn-only-objects-this-transaction-modified-are-compared
+file: engine/txn.go
+find: \t\tif c.Kind == prolly.Modified && c.From.Model == c.To.Model {\n\t\t\tmine[c.Path] = c
+replace: \t\tif false {\n\t\t\tmine[c.Path] = c
+pkg: ./engine
+run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
+
+id: engine-txn-a-changed-cell-is-its-row
+file: engine/txn.go
+find: \t\tif c.To.Model == table.ID && mc.Kind == model.Modified && len(item) >= 2 {
+replace: \t\tif false {
+pkg: ./engine
+run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
+
+id: engine-txn-items-both-wrote-are-found
+file: engine/txn.go
+find: \t\thit = written[item]
+replace: \t\thit = false
+pkg: ./engine
+run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
+
 id: engine-txn-a-branch-mid-merge-takes-no-transaction
 file: engine/txn.go
 find: \tif ws.Merge != nil {\n\t\treturn nil, ErrMergeInProgress\n\t}
