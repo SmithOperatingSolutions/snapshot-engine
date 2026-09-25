@@ -497,13 +497,13 @@ func TestACommitCancelledOnceItsPublishIsUnderWayLearnsItsOutcome(t *testing.T) 
 	outs, queued := enqueueInOrder(db, committing(ctx, x), committing(actx, a))
 	out = outs[1]
 	released(t, h, held)
+	if err := <-outs[0]; err != nil { // the leader returns once its publish, the seam included, is done
+		t.Errorf("the leader's commit = %v, want nil", err)
+	}
 	select {
 	case err := <-early:
 		t.Fatalf("a commit whose caller cancelled mid-publish returned %v before the publish finished: the caller is told it failed while its change lands", err)
 	default:
-	}
-	if err := <-outs[0]; err != nil {
-		t.Errorf("the leader's commit = %v, want nil", err)
 	}
 	if err := <-out; err != nil || !queued {
 		t.Errorf("a commit whose caller cancelled after its publish began = %v (queued: %v), want nil: the publish landed it", err, queued)
@@ -582,5 +582,34 @@ func TestAMemberDeniedWriteFailsAloneInItsBatch(t *testing.T) {
 	}
 	if got, want := h.sizes(), []int{1, 2}; !queued || !slices.Equal(got, want) {
 		t.Errorf("publishes carried %v transactions (queued: %v), want %v: the denied member left out, the others published together", got, queued, want)
+	}
+}
+
+// A member whose principal lost Read on the branch after it began fails
+// alone with ErrPermissionDenied, at the head of its batch or not, and the
+// batch publishes the rest as a member that may read.
+func TestAMemberDeniedReadFailsAloneInItsBatch(t *testing.T) {
+	db, g := grantDB(t)
+	grantOK(t, g.Grant("user:bob", engine.BranchScope("main"), engine.PermRead, engine.PermWrite))
+	bobs := queueWrite(t, db, bob, "people", map[int64]string{2: "bea"})
+	alices := queueWrite(t, db, alice, "pets", map[int64]string{1: "ann"})
+	grantOK(t, g.Revoke("user:bob", engine.BranchScope("main"), engine.PermRead))
+	h, held := holdTheQueue(t, db, 1, nil)
+	outs, queued := enqueueInOrder(db, committing(ctx, bobs), committing(ctx, alices))
+	released(t, h, held)
+	if err := <-outs[0]; !errors.Is(err, engine.ErrPermissionDenied) {
+		t.Errorf("bob's commit, his Read on main revoked, at the head of the batch = %v, want ErrPermissionDenied", err)
+	}
+	if err := <-outs[1]; err != nil {
+		t.Errorf("alice's commit behind it = %v, want it committed", err)
+	}
+	if got := grantRow(t, db, "main", "people", 2); got != "bob" {
+		t.Errorf("row 2 of people is %q, want bob: a member denied Read rode its batch into the working set", got)
+	}
+	if got := grantRow(t, db, "main", "pets", 1); got != "ann" {
+		t.Errorf("row 1 of pets is %q, want alice's ann", got)
+	}
+	if got, want := h.sizes(), []int{1, 1}; !queued || !slices.Equal(got, want) {
+		t.Errorf("publishes carried %v transactions (queued: %v), want %v", got, queued, want)
 	}
 }

@@ -2106,3 +2106,117 @@ find: if len(path) == MaxDepth {
 replace: if len(path) == MaxDepth && false {
 pkg: ./model/document
 run: ^FuzzParseLocation$
+
+# engine commit queue (DESIGN D20)
+
+id: engine-queue-a-leader-takes-every-transaction-waiting
+file: engine/queue.go
+find: for n < len(q.waiting) && n < maxBatch && q.waiting[n].tx != nil {
+replace: for false {
+pkg: ./engine
+run: ^TestConcurrentTransactionsShareAPublish$
+
+id: engine-queue-a-batch-is-bounded
+file: engine/queue.go
+find: for n < len(q.waiting) && n < maxBatch && q.waiting[n].tx != nil {
+replace: for n < len(q.waiting) && q.waiting[n].tx != nil {
+pkg: ./engine
+run: ^TestAPublishCarriesAtMostMaxBatchTransactions$
+
+id: engine-queue-session-calls-take-their-turn
+file: engine/queue.go
+find: \tif q.bypass {\n
+replace: \tif q.bypass || c.op != nil {\n
+pkg: ./engine
+run: ^TestSessionCommitsAndMergesTakeTheirTurnWithTransactions$
+
+id: engine-queue-each-member-applies-onto-the-last
+file: engine/queue.go
+find: \t\tw = next\n
+replace: \t\t_ = next\n
+pkg: ./engine
+run: ^TestConcurrentTransactionsShareAPublish$
+
+id: engine-queue-a-moved-working-set-is-merged
+file: engine/txn.go
+find: \tif cur.Root() == t.base.Root() {\n\t\treturn ours, nil
+replace: \tif true {\n\t\treturn ours, nil
+pkg: ./engine
+run: ^TestConcurrentTransactionsShareAPublish$
+
+id: engine-queue-a-member-meets-the-item-rule
+file: engine/txn.go
+find: \tif err := t.writeWrite(ctx, ours, cur); err != nil {
+replace: \tif err := error(nil); err != nil {
+pkg: ./engine
+run: ^TestAMemberThatCollidesFailsAloneAndTheRestOfItsBatchCommits$
+
+id: engine-queue-a-lost-swap-rebuilds
+file: engine/queue.go
+find: \tif errors.Is(err, vcs.ErrConflict) {\n\t\treturn true
+replace: \tif errors.Is(err, vcs.ErrConflict) && false {\n\t\treturn true
+pkg: ./engine
+run: ^TestALostSwapRebuildsTheBatchFromTheNewRoot$
+
+id: engine-queue-each-member-is-asked-for-its-writes
+file: engine/queue.go
+find: \t\t\terr = d.mayWrite(c.ctx, c.tx.s.p, branch, w, next, g)
+replace: \t\t\t_ = d.mayWrite
+pkg: ./engine
+run: ^TestAMemberDeniedWriteFailsAloneInItsBatch$
+
+id: engine-queue-each-object-a-member-writes-is-asked
+file: engine/queue.go
+find: \t\tif err := auth.Check(ctx, d.o.Authorizer, p, auth.Write, "path:"+branch+":"+c.Path); err != nil {
+replace: \t\tif err := error(nil); err != nil {
+pkg: ./engine
+run: ^TestAMemberDeniedWriteFailsAloneInItsBatch$
+
+id: engine-queue-a-member-is-asked-for-write-on-the-branch
+file: engine/queue.go
+find: \tif err := auth.Check(ctx, d.o.Authorizer, p, auth.Write, "branch:"+branch); err != nil {
+replace: \tif err := error(nil); err != nil {
+pkg: ./engine
+run: ^TestAProtectedMainTakesMergesNotDirectWrites$
+
+id: engine-queue-a-member-is-asked-for-read-on-the-branch
+file: engine/queue.go
+find: \t\terrs[i] = translate(auth.Check(c.ctx, d.o.Authorizer, c.tx.s.p, auth.Read, "branch:"+branch))
+replace: \t\terrs[i] = nil
+pkg: ./engine
+run: ^TestAMemberDeniedReadFailsAloneInItsBatch$
+
+id: engine-queue-a-cancelled-call-leaves
+file: engine/queue.go
+find: \t\tq.waiting = slices.DeleteFunc(q.waiting, func(w *queued) bool { return w == c })
+replace: \t\tq.waiting = slices.DeleteFunc(q.waiting, func(w *queued) bool { return false })
+pkg: ./engine
+run: ^TestACommitCancelledWhileQueuedLeavesAndTheOthersCommit$
+
+id: engine-queue-a-taken-call-waits-for-its-outcome
+file: engine/queue.go
+find: \t\tif c.taken { // a leader has it: its outcome is on its way
+replace: \t\tif false {
+pkg: ./engine
+run: ^TestACommitCancelledOnceItsPublishIsUnderWayLearnsItsOutcome$
+
+id: engine-queue-a-member-that-fails-is-left-out
+file: engine/queue.go
+find: \t\tif errs[i] != nil {\n\t\t\tcontinue\n\t\t}\n\t\tnext, err
+replace: \t\tif false {\n\t\t\tcontinue\n\t\t}\n\t\tnext, err
+pkg: ./engine
+run: ^TestAMemberDeniedReadFailsAloneInItsBatch$
+
+id: engine-queue-a-batch-is-allowed-only-what-its-members-were
+file: engine/queue.go
+find: if g, ok := ctx.Value(grantedKey{}).(*granted); ok && g.allowed[question{a, resource}] {
+replace: if _, ok := ctx.Value(grantedKey{}).(*granted); ok {
+pkg: ./engine
+run: ^TestABatchIsAllowedOnlyWhatItsMembersWere$
+
+id: engine-queue-no-authorizer-denies
+file: engine/queue.go
+find: \tif b.inner == nil {\n\t\treturn auth.ErrDenied
+replace: \tif b.inner == nil {\n\t\treturn nil
+pkg: ./engine
+run: ^TestABatchIsAllowedOnlyWhatItsMembersWere$
