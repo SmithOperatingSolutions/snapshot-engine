@@ -395,3 +395,42 @@ func TestByteCellsDiffByContent(t *testing.T) {
 		t.Fatal("Diff of two tables with different schemas did not fail")
 	}
 }
+
+// FuzzParseLocation reads locations under three schemas (an integer key, a
+// composite text and numeric key, and no declared key): what parses names
+// a row or a column the schema has, and Locate writes it back as the same
+// bytes, so a location has one spelling.
+func FuzzParseLocation(f *testing.F) {
+	schemas := []table.Schema{
+		people(),
+		{Columns: []table.Column{{Tag: 1, Name: "k", Type: table.TypeText}, {Tag: 2, Name: "n", Type: table.TypeNumeric}, {Tag: 3, Name: "v", Type: table.TypeBytea, Nullable: true}}, PrimaryKey: []table.Tag{1, 2}},
+		{Columns: []table.Column{{Tag: 1, Name: "v", Type: table.TypeText}}},
+	}
+	tables := make([]*table.Table, len(schemas))
+	for i, s := range schemas {
+		tb, err := table.Create(ctx, memstore.New(), cfg(), s)
+		if err != nil {
+			f.Fatal(err)
+		}
+		tables[i] = tb
+	}
+	for _, loc := range []string{"garbage", "", "\x01\x80\x00\x00\x00\x00\x00\x00\x04\x00\x03", "\x01\x80\x00\x00\x00\x00\x00\x00\x04\x00\x09", "\x01a\x00\x00\x01\x03\x80\x00\x00\x01\x02\x00\x00\x02", "0123456789abcdef\x00\x01"} {
+		for i := range tables {
+			f.Add(uint8(i), []byte(loc))
+		}
+	}
+	f.Fuzz(func(t *testing.T, which uint8, loc []byte) {
+		tb := tables[int(which)%len(tables)]
+		key, col, err := tb.ParseLocation(loc)
+		if err != nil {
+			return
+		}
+		back, err := tb.Locate(key, col)
+		if err != nil {
+			t.Fatalf("ParseLocation(%x) = %v, column %d, which Locate refuses: %v", loc, key, col, err)
+		}
+		if string(back) != string(loc) {
+			t.Fatalf("ParseLocation(%x) = %v, column %d, which Locate writes as %x: one place, two spellings", loc, key, col, back)
+		}
+	})
+}

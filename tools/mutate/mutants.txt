@@ -2099,3 +2099,10 @@ find: if err := r.Err(); err != nil || len(key) == 0 {
 replace: if err := r.Err(); err != nil {
 pkg: ./model/kv
 run: ^TestALocationNamesAKeyAndWhatIsBelowIt$
+
+id: table-a-location-names-a-column-the-schema-has
+file: model/table/model.go
+find: if _, _, ok := t.schema.column(tag); !ok {
+replace: if _, _, ok := t.schema.column(tag); !ok && false {
+pkg: ./model/table
+run: ^FuzzParseLocation$
