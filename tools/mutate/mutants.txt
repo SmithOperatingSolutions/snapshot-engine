@@ -2385,3 +2385,52 @@ find: for i, root := range []model.Root{c.From.Root, c.To.Root} {
 replace: for i, root := range []model.Root{c.From.Root, c.From.Root} {
 pkg: ./engine
 run: ^TestACounterSetOrDeletedWhileIncrementedStillSerializes$
+
+id: engine-queue-a-panicking-publish-answers-every-member
+file: engine/queue.go
+find: \t\t\t\t\tc.finish(fmt.Errorf("%w: a commit's leader panicked", ErrInternal))
+replace: \t\t\t\t\t_ = c
+pkg: ./engine
+run: ^TestAPublishThatPanicsAnswersEveryMemberAndFreesTheQueue$
+
+id: engine-queue-a-panicking-publish-frees-the-queue
+file: engine/queue.go
+find: \t\tq.busy = false\n\t\tq.kick()\n\t\td.qmu.Unlock()\n\t\tif r != nil {
+replace: \t\tq.busy = r != nil\n\t\tq.kick()\n\t\td.qmu.Unlock()\n\t\tif r != nil {
+pkg: ./engine
+run: ^TestAPublishThatPanicsAnswersEveryMemberAndFreesTheQueue$
+
+id: engine-queue-a-panicking-publish-goes-on-up
+file: engine/queue.go
+find: \t\tif r != nil {\n\t\t\tpanic(r)
+replace: \t\tif false {\n\t\t\tpanic(r)
+pkg: ./engine
+run: ^TestAPublishThatPanicsAnswersEveryMemberAndFreesTheQueue$
+
+id: engine-queue-a-member-without-a-deadline-leaves-the-batch-without-one
+file: engine/queue.go
+find: \t\tif !ok {\n\t\t\treturn context.WithCancel(ctx)
+replace: \t\tif !ok && false {\n\t\t\treturn context.WithCancel(ctx)
+pkg: ./engine
+run: ^TestABatchRunsUntilItsLatestMembersDeadline$
+
+id: engine-queue-a-batch-runs-until-the-latest-deadline
+file: engine/queue.go
+find: \t\tif dl.After(latest) {
+replace: \t\tif latest.IsZero() {
+pkg: ./engine
+run: ^TestABatchRunsUntilItsLatestMembersDeadline$
+
+id: engine-queue-a-batch-has-its-members-deadline
+file: engine/queue.go
+find: \treturn context.WithDeadline(ctx, latest)
+replace: \treturn context.WithCancel(ctx)
+pkg: ./engine
+run: ^TestABatchRunsUntilItsLatestMembersDeadline$
+
+id: engine-queue-a-batch-outlives-its-leaders-cancellation
+file: engine/queue.go
+find: \tctx := context.WithoutCancel(batch[0].ctx)
+replace: \tctx := batch[0].ctx
+pkg: ./engine
+run: ^TestABatchRunsUntilItsLatestMembersDeadline$
