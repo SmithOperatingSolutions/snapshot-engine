@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/SmithOperatingSolutions/snapshot-engine/merge"
 )
@@ -291,4 +292,37 @@ func FuzzTree(f *testing.F) {
 			}
 		}
 	})
+}
+
+// A tree merge costs time in proportion to its objects' fields: every
+// field was found by scanning its object, once per name per side, so an
+// object of 12,000 fields took most of a second to merge
+// (snapshot-engine#6). A timing guard with headroom: the best of three
+// merges must take under 100 ms (ten times that under the race detector).
+func TestRegression_SE6_ATreeMergeIsNotQuadraticInFields(t *testing.T) {
+	const n = 12000
+	obj := func(changed int, to string) merge.Node {
+		fs := make([]merge.Field, n)
+		for i := range fs {
+			fs[i] = merge.Field{Name: "f" + strconv.Itoa(i), Value: merge.Num("1")}
+		}
+		if changed >= 0 {
+			fs[changed].Value = merge.Num(to)
+		}
+		return merge.Obj(fs...)
+	}
+	base, ours, theirs, want := obj(-1, ""), obj(0, "2"), obj(1, "3"), obj(0, "2")
+	want.Fields[1].Value = merge.Num("3")
+	best := time.Duration(1<<63 - 1)
+	for range 3 {
+		start := time.Now()
+		got := merge.Tree(base, ours, theirs, merge.TreeOptions{})
+		best = min(best, time.Since(start))
+		if !got.Clean() || !got.Value.Equal(want) {
+			t.Fatalf("two fields of %d changed on different sides merged with conflicts %v, or not to both", n, got.Conflicts)
+		}
+	}
+	if ceiling := raceScale * 100 * time.Millisecond; best > ceiling {
+		t.Errorf("merging an object of %d fields changed on both sides took %v at best, over %v: a merge grows with the square of an object's fields", n, best, ceiling)
+	}
 }
