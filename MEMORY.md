@@ -105,36 +105,22 @@ new team may keep or revise them, and should record any change here.
 
 ## The development machine
 
-The engine was built on one machine, and the next developer works on the
-same one. It is an i7-1360P with 4 performance and 8 efficient cores, 62 GB of
-RAM, and an NVMe disk.
+The engine is built and measured on one developer machine: 12 cores, 62 GB
+of RAM, an NVMe disk. Its checkouts of this repository and of snapshot-core
+sit side by side; a `go.work` over the two is made by hand when needed, and
+never committed. Branches with work in progress live in worktrees beside
+the main checkout, and the GitHub issues say which.
 
-- **Checkouts.** `/home/adamsmith/git/snapshot-engine` (main) and
-  `/home/adamsmith/git/snapshot-core`. A `go.work` over the two is made by
-  hand when needed, and never committed.
-- **Worktrees as of 2026-09-25, later that day:**
-  - `../snapshot-engine-v020` holds branch `core-v0.2.0`, the move to core
-    v0.2.0 (#7): finished, every gate green, measured, on main, awaiting
-    its PR.
-  - `../snapshot-engine-bd` holds branch `batch-diff` (#8), rebased onto
-    `core-v0.2.0`: finished, every gate green, measured, awaiting its PR
-    after #7's. The rebases kept the test-first history.
-  
-  Every other branch is already in main, and branches are kept after merging.
 - **Memory caps.** `systemd-run --user --scope` works here and is how heavy
   runs are capped.
-- **Measurement lock.** Timed runs have shared a lock file under the Claude
-  scratchpad (`/tmp/claude-1000/.../scratchpad/measure.lock`). Any path works,
-  as long as everyone measuring uses the same one.
-  Before starting a chain, `pgrep -af bench` for another session's chain
-  and take **its** lock path (2026-09-25: a snapshot-core session's chain
-  was still running under its own scratchpad's lock when the engine's
-  started).
+- **Measurement lock.** Timed runs share one lock file (`flock`); any path
+  works, as long as everyone measuring uses the same one. Before starting a
+  chain, `pgrep -af bench` for another session's chain and take **its** lock
+  path.
 - **A quiet machine means yours too.** A few `go build` and single-package
-  test runs during a disk run showed as its load maximum (3.84 against 2.68
-  for the same run undisturbed). Run nothing while a timed run is on.
-- **Other services share the machine.** Docker, a Postgres, logflare and
-  MinIO all run here, so check the load before timing anything.
+  test runs during a disk run showed as its load maximum. Run nothing while
+  a timed run is on, and check the load before timing anything: other
+  services share the machine.
 
 ## Tooling quirks seen on the development machine
 
