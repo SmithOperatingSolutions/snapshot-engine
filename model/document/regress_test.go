@@ -4,6 +4,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"runtime"
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk"
@@ -61,5 +64,47 @@ func TestRegression_SE5_ReadingACollectionSizesNothingFromItsRootsClaim(t *testi
 	}
 	if grew := after.TotalAlloc - before.TotalAlloc; grew > 1<<20 {
 		t.Errorf("reading a collection whose root claims %d records over one real one allocated %d bytes: a forged root's claim costs memory without bound", 1+1<<16, grew)
+	}
+}
+
+// An array one side changed by more than merge.MaxSequenceEdits while the
+// other changed it too is a conflict located at the array's field, naming
+// the budget; at the budget it merges (snapshot-engine#4, DESIGN D18).
+func TestRegression_SE4_AnArrayPastTheEditBudgetConflictsAtItsField(t *testing.T) {
+	elems := make([]merge.Node, 600)
+	for i := range elems {
+		elems[i] = merge.Str("e" + strconv.Itoa(i))
+	}
+	replaced := func(n int) []merge.Node {
+		out := slices.Clone(elems)
+		for i := range n {
+			out[i] = merge.Str("r" + strconv.Itoa(i))
+		}
+		return out
+	}
+	rec := func(l []merge.Node) map[string]merge.Node {
+		return map[string]merge.Node{"doc": merge.Obj(merge.Field{Name: "list", Value: merge.Arr(l...)}, merge.Field{Name: "n", Value: merge.Num("1")})}
+	}
+	s := memstore.New()
+	base := write(t, s, rec(elems))
+	theirs := write(t, s, rec(append(slices.Clone(elems), merge.Str("z"))))
+
+	// Positive control: one side at the budget, the other appending.
+	atLimit := replaced(merge.MaxSequenceEdits / 2)
+	res := mergeOf(t, s, base, write(t, s, rec(atLimit)), theirs)
+	if len(res.Conflicts) != 0 {
+		t.Fatalf("an array changed by exactly the edit budget on one side and appended to on the other conflicted: %+v", res.Conflicts)
+	}
+	if got, want := readBack(t, s, res.Root)["doc"], rec(append(atLimit, merge.Str("z")))["doc"]; !got.Equal(want) {
+		t.Fatalf("the record merged to %.60s…, want both sides' changes", document.Encode(got))
+	}
+
+	res = mergeOf(t, s, base, write(t, s, rec(replaced(merge.MaxSequenceEdits/2+1))), theirs)
+	if len(res.Conflicts) != 1 {
+		t.Fatalf("an array changed past the edit budget on one side and appended to on the other: %d conflicts %+v, want one at its field", len(res.Conflicts), res.Conflicts)
+	}
+	id, path, err := document.ParseLocation(res.Conflicts[0].Location)
+	if err != nil || string(id) != "doc" || path.String() != "list" || !strings.Contains(res.Conflicts[0].Reason, strconv.Itoa(merge.MaxSequenceEdits)) {
+		t.Errorf("the conflict is at %q %v (%v), saying %q: want record doc, field list, naming the budget", id, path, err, res.Conflicts[0].Reason)
 	}
 }

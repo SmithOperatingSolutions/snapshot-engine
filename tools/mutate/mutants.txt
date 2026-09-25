@@ -2002,3 +2002,10 @@ find: const MaxSequenceEdits = 1000
 replace: const MaxSequenceEdits = 100000
 pkg: ./model/kv
 run: ^TestRegression_SE4_AKVSequencePastTheEditBudgetConflictsAtTheKey$
+
+id: merge-sequence-edit-budget-reaches-documents
+file: merge/sequence.go
+find: const MaxSequenceEdits = 1000
+replace: const MaxSequenceEdits = 100000
+pkg: ./model/document
+run: ^TestRegression_SE4_AnArrayPastTheEditBudgetConflictsAtItsField$
