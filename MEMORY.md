@@ -112,13 +112,13 @@ RAM, and an NVMe disk.
 - **Checkouts.** `/home/adamsmith/git/snapshot-engine` (main) and
   `/home/adamsmith/git/snapshot-core`. A `go.work` over the two is made by
   hand when needed, and never committed.
-- **Worktrees as of 2026-09-25:**
-  - `../snapshot-engine-bd` holds branch `batch-diff`, a partial start on #8.
-    It has seven commits plus an uncommitted engine change, none verified; #8
-    describes it.
+- **Worktrees as of 2026-09-25, later that day:**
   - `../snapshot-engine-v020` holds branch `core-v0.2.0`, the move to core
-    v0.2.0 (#7). It was stopped part-way, with uncommitted doc edits and no
-    gates run; #7 lists what is done and what is not.
+    v0.2.0 (#7): finished, every gate green, measured, on main, awaiting
+    its PR.
+  - `../snapshot-engine-bd` holds branch `batch-diff` (#8), rebased onto
+    `core-v0.2.0`: finished, every gate green, measured, awaiting its PR
+    after #7's. The rebases kept the test-first history.
   
   Every other branch is already in main, and branches are kept after merging.
 - **Memory caps.** `systemd-run --user --scope` works here and is how heavy
@@ -126,6 +126,13 @@ RAM, and an NVMe disk.
 - **Measurement lock.** Timed runs have shared a lock file under the Claude
   scratchpad (`/tmp/claude-1000/.../scratchpad/measure.lock`). Any path works,
   as long as everyone measuring uses the same one.
+  Before starting a chain, `pgrep -af bench` for another session's chain
+  and take **its** lock path (2026-09-25: a snapshot-core session's chain
+  was still running under its own scratchpad's lock when the engine's
+  started).
+- **A quiet machine means yours too.** A few `go build` and single-package
+  test runs during a disk run showed as its load maximum (3.84 against 2.68
+  for the same run undisturbed). Run nothing while a timed run is on.
 - **Other services share the machine.** Docker, a Postgres, logflare and
   MinIO all run here, so check the load before timing anything.
 

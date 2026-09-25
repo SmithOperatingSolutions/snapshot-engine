@@ -553,3 +553,58 @@ say; the phase's p99 says the work per transaction is not larger.
 **Not confirmed here.** The group-commit section's "next core" column
 took one session of W3 in memory from 214 to 922 tx/s on the unreleased
 core. W3 was not part of these runs; it is measured on v0.2.0 by #8.
+
+## Rebase (#8)
+
+DESIGN D22: a batch member is applied by rebasing its own changes onto
+the batch's working set, at the cost of those changes, instead of
+diffing its snapshot against everything that landed since. W3 only
+(`-only W3 -conc 1,4,16,64`), full scale, 30 s a phase, both backends,
+each run under the shared measurement lock on a quiet machine (load
+under 2 and no test or bench process before each run started), nothing
+else run during them. "Before" is `core-v0.2.0` as it ends (8e828cd),
+the engine on core v0.2.0 without the rebase; "after" is this branch as
+it ends, on the same core. Every phase checks the balances against the
+sum of the increments: no lost update in any phase of any run. Load
+average during each run, median (max): disk before 2.22 (2.68), after
+1.95 (3.71); memory before 1.42 (2.02), after 1.38 (1.83).
+
+W3 read-modify-write over a million rows, tx/s and p99; retries are the
+phase's serialization failures, every one a real collision under the
+item rule (none a lost swap), retried and committed:
+
+| Keys | Sessions | Disk before | p99 | retries | Disk after | p99 | retries | Memory before | p99 | retries | Memory after | p99 | retries |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| uniform | 1 | 28.3 | 57 ms | 0 | 28.2 | 57 ms | 0 | 930.5 | 2.2 ms | 0 | 927.1 | 2.2 ms | 0 |
+| uniform | 4 | 49.6 | 117 ms | 0 | 50.5 | 105 ms | 0 | 454.2 | 15 ms | 0 | 756.6 | 10 ms | 0 |
+| uniform | 16 | 126.0 | 159 ms | 0 | 160.7 | 126 ms | 0 | 310.3 | 71 ms | 0 | 574.0 | 40 ms | 0 |
+| uniform | 64 | 144.3 | 487 ms | 0 | 380.0 | 193 ms | 3 | 180.0 | 487 ms | 0 | 728.4 | 109 ms | 2 |
+| Zipf 1.1 | 1 | 29.2 | 57 ms | 0 | 29.1 | 55 ms | 0 | 894.7 | 2.2 ms | 0 | 891.4 | 2.4 ms | 0 |
+| Zipf 1.1 | 4 | 47.7 | 185 ms | 134 | 50.4 | 159 ms | 132 | 525.1 | 18 ms | 1,600 | 731.2 | 13 ms | 2,163 |
+| Zipf 1.1 | 16 | 107.4 | 436 ms | 851 | 121.3 | 336 ms | 1,047 | 363.2 | 126 ms | 3,255 | 488.5 | 92 ms | 4,169 |
+| Zipf 1.1 | 64 | 168.5 | 1.2 s | 2,971 | 239.9 | 839 ms | 4,309 | 287.8 | 705 ms | 5,130 | 574.8 | 369 ms | 9,822 |
+
+**What changed.** The ceiling above 16 sessions is gone. On disk, 64
+sessions on uniform keys went from 144.3 to 380.0 tx/s, 2.6 times, and
+from 15% above 16 sessions to 2.4 times above it. In memory, where
+throughput fell with every session added before (930 to 454 to 310 to
+180), it now holds: 927, 757, 574, 728. The p99 at 64 sessions fell
+from 487 ms to 193 ms on disk and to 109 ms in memory. One session is
+unchanged on both backends: a commit onto an unmoved working set never
+takes the rebase. Zipf keys gain less, 168.5 to 239.9 on disk and 287.8
+to 574.8 in memory at 64 sessions, because collisions on hot rows still
+go through the merge and retry; their retries rise with throughput
+(2,971 to 4,309 on disk), every one a real collision of two writers on
+one row. The few uniform-key retries after (3 on disk, 2 in memory, at
+17,000 and 33,000 transactions) are the same: genuine same-row
+collisions among 64 in flight over a million rows, none a lost swap.
+
+One session in memory on core v0.2.0 is 930.5 tx/s before and 927.1
+after, against 214.3 on v0.1.1: the group-commit section's "next core"
+figure (922.0) confirmed on the tag (#7).
+
+**Where the time goes now.** At 64 sessions in memory the batch leader
+still does all of a batch's work alone, at each member's own cost; a
+batch of 64 members is 64 rebases in a row. The options the issue
+names remain: rebasing members in parallel against the batch start, and
+the core's decoded-node cache (snapshot-core#32).

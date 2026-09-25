@@ -872,35 +872,35 @@ file: engine/txn.go
 find: \t\tif hit {\n\t\t\treturn fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrSerialization)
 replace: \t\tif false {\n\t\t\treturn fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrSerialization)
 pkg: ./engine
-run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
+run: ^(TestARebaseMakesWhatTheMergeMakes|TestTransactionsWritingOneItemSerializeWhateverTheyWrote)$
 
 id: engine-txn-only-objects-this-transaction-modified-are-compared
 file: engine/txn.go
 find: \t\tif c.Kind == prolly.Modified && c.From.Model == c.To.Model {\n\t\t\tmine[c.Path] = c
 replace: \t\tif false {\n\t\t\tmine[c.Path] = c
 pkg: ./engine
-run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
+run: ^(TestARebaseMakesWhatTheMergeMakes|TestTransactionsWritingOneItemSerializeWhateverTheyWrote)$
 
 id: engine-txn-a-changed-cell-is-its-row
 file: engine/txn.go
 find: \t\tif c.To.Model == table.ID && mc.Kind == model.Modified && len(item) >= 2 {
 replace: \t\tif false {
 pkg: ./engine
-run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
+run: ^(TestARebaseMakesWhatTheMergeMakes|TestTransactionsWritingOneItemSerializeWhateverTheyWrote)$
 
 id: engine-txn-items-both-wrote-are-found
 file: engine/txn.go
 find: \t\thit = written[item]
 replace: \t\thit = false
 pkg: ./engine
-run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
+run: ^(TestARebaseMakesWhatTheMergeMakes|TestTransactionsWritingOneItemSerializeWhateverTheyWrote)$
 
 id: engine-txn-different-items-do-not-conflict
 file: engine/txn.go
 find: \t\thit = written[item]
 replace: \t\thit = true
 pkg: ./engine
-run: ^TestTransactionsWritingDifferentItemsAllCommit$
+run: ^(TestARebaseMakesWhatTheMergeMakes|TestTransactionsWritingDifferentItemsAllCommit)$
 
 id: engine-txn-a-schema-change-is-every-row
 file: engine/txn.go
@@ -2149,7 +2149,7 @@ file: engine/txn.go
 find: \tif err := t.writeWrite(ctx, ours, cur); err != nil {
 replace: \tif err := error(nil); err != nil {
 pkg: ./engine
-run: ^TestAMemberThatCollidesFailsAloneAndTheRestOfItsBatchCommits$
+run: ^(TestARebaseMakesWhatTheMergeMakes|TestAMemberThatCollidesFailsAloneAndTheRestOfItsBatchCommits)$
 
 id: engine-queue-a-lost-swap-rebuilds
 file: engine/queue.go
@@ -2385,3 +2385,110 @@ find: for i, root := range []model.Root{c.From.Root, c.To.Root} {
 replace: for i, root := range []model.Root{c.From.Root, c.From.Root} {
 pkg: ./engine
 run: ^TestACounterSetOrDeletedWhileIncrementedStillSerializes$
+
+# engine commit queue: the panic recovery and the batch deadline (#8 backfills)
+id: engine-queue-a-panicking-publish-answers-every-member
+file: engine/queue.go
+find: \t\t\t\t\tc.finish(fmt.Errorf("%w: a commit's leader panicked", ErrInternal))
+replace: \t\t\t\t\t_ = c
+pkg: ./engine
+run: ^TestAPublishThatPanicsAnswersEveryMemberAndFreesTheQueue$
+
+id: engine-queue-a-panicking-publish-frees-the-queue
+file: engine/queue.go
+find: \t\tq.busy = false\n\t\tq.kick()\n\t\td.qmu.Unlock()\n\t\tif r != nil {
+replace: \t\tq.busy = r != nil\n\t\tq.kick()\n\t\td.qmu.Unlock()\n\t\tif r != nil {
+pkg: ./engine
+run: ^TestAPublishThatPanicsAnswersEveryMemberAndFreesTheQueue$
+
+id: engine-queue-a-panicking-publish-goes-on-up
+file: engine/queue.go
+find: \t\tif r != nil {\n\t\t\tpanic(r)
+replace: \t\tif false {\n\t\t\tpanic(r)
+pkg: ./engine
+run: ^TestAPublishThatPanicsAnswersEveryMemberAndFreesTheQueue$
+
+id: engine-queue-a-member-without-a-deadline-leaves-the-batch-without-one
+file: engine/queue.go
+find: \t\tif !ok {\n\t\t\treturn context.WithCancel(ctx)
+replace: \t\tif !ok && false {\n\t\t\treturn context.WithCancel(ctx)
+pkg: ./engine
+run: ^TestABatchRunsUntilItsLatestMembersDeadline$
+
+id: engine-queue-a-batch-runs-until-the-latest-deadline
+file: engine/queue.go
+find: \t\tif dl.After(latest) {
+replace: \t\tif latest.IsZero() {
+pkg: ./engine
+run: ^TestABatchRunsUntilItsLatestMembersDeadline$
+
+id: engine-queue-a-batch-has-its-members-deadline
+file: engine/queue.go
+find: \treturn context.WithDeadline(ctx, latest)
+replace: \treturn context.WithCancel(ctx)
+pkg: ./engine
+run: ^TestABatchRunsUntilItsLatestMembersDeadline$
+
+id: engine-queue-a-batch-outlives-its-leaders-cancellation
+file: engine/queue.go
+find: \tctx := context.WithoutCancel(batch[0].ctx)
+replace: \tctx := batch[0].ctx
+pkg: ./engine
+run: ^TestABatchRunsUntilItsLatestMembersDeadline$
+
+# engine rebase (#8)
+id: engine-txn-rebase-takes-only-objects-modified-on-both-sides
+file: engine/txn.go
+find: \t\tif c.From.Model != c.To.Model || rb == nil {\n\t\t\treturn nil, false, nil
+replace: \t\tif rb == nil {\n\t\t\treturn nil, false, nil
+pkg: ./engine
+run: ^TestARebaseMakesWhatTheMergeMakes$
+
+id: engine-txn-rebase-leaves-an-object-cur-dropped-to-the-merge
+file: engine/txn.go
+find: \t\tif !held || now.Model != c.From.Model {
+replace: \t\tif (!held || now.Model != c.From.Model) && false {
+pkg: ./engine
+run: ^TestARebaseMakesWhatTheMergeMakes$
+
+id: engine-txn-rebase-an-object-cur-changed-too-goes-through-its-model
+file: engine/txn.go
+find: \t\tif now != c.From { // cur changed it too: its items against ours'
+replace: \t\tif false { // cur changed it too: its items against ours'
+pkg: ./engine
+run: ^TestARebaseMakesWhatTheMergeMakes$
+
+id: engine-txn-rebase-an-item-both-changed-serializes
+file: engine/txn.go
+find: \t\t\t\treturn nil, true, fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrSerialization)
+replace: \t\t\t\treturn nil, true, fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrInternal)
+pkg: ./engine
+run: ^TestARebaseMakesWhatTheMergeMakes$
+
+id: engine-txn-rebase-leaves-a-kv-key-both-wrote-to-the-merge
+file: engine/txn.go
+find: \t\t\tcase errors.Is(err, kv.ErrChangedSince), errors.Is(err, table.ErrSchema):
+replace: \t\t\tcase errors.Is(err, table.ErrSchema):
+pkg: ./engine
+run: ^(TestConcurrentIncrementsOfOneCounterBothCommit|TestARebaseMakesWhatTheMergeMakes)$
+
+id: engine-txn-rebase-leaves-a-schema-change-to-the-merge
+file: engine/txn.go
+find: \t\t\tcase errors.Is(err, kv.ErrChangedSince), errors.Is(err, table.ErrSchema):
+replace: \t\t\tcase errors.Is(err, kv.ErrChangedSince):
+pkg: ./engine
+run: ^TestARebaseMakesWhatTheMergeMakes$
+
+id: engine-txn-rebase-lands-the-rebased-object
+file: engine/txn.go
+find: \t\t\tnext = object.Ref{Model: c.To.Model, Root: root}
+replace: \t\t\t_ = root
+pkg: ./engine
+run: ^TestARebaseMakesWhatTheMergeMakes$
+
+id: engine-txn-a-commit-onto-a-moved-working-set-is-rebased
+file: engine/txn.go
+find: \tif next, ok, err := t.rebase(ctx, ours, cur); err != nil || ok {\n\t\treturn next, err\n\t}
+replace: 
+pkg: ./engine
+run: ^TestACommitOntoAMovedWorkingSetReadsItsOwnChangesNotWhatMoved$
