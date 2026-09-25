@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,6 +57,11 @@ func Num(text string) Node { return Node{Kind: Number, Number: text} }
 // Boolean builds a Bool.
 func Boolean(b bool) Node { return Node{Kind: Bool, Bool: b} }
 
+// MaxDepth is the deepest nesting of arrays and objects Tree merges, the
+// document model's limit; a value nested deeper is a conflict at the root
+// (snapshot-engine#6).
+const MaxDepth = 64
+
 // Equal reports whether two nodes are the same value.
 func (n Node) Equal(m Node) bool { return n.Canonical() == m.Canonical() }
 
@@ -67,36 +73,60 @@ func (n Node) Canonical() string {
 	return b.String()
 }
 
+// canonical writes n's text with a stack of its own, one small frame per
+// level, so a node nested however deep costs heap in proportion to its
+// depth and never the goroutine's stack (snapshot-engine#6).
 func (n Node) canonical(b *strings.Builder) {
-	switch n.Kind {
-	case Null:
-		b.WriteString("null")
-	case Bool:
-		b.WriteString(strconv.FormatBool(n.Bool))
-	case Number:
-		b.WriteString(n.Number)
-	case String:
-		b.WriteString(strconv.Quote(n.Text))
-	case Array:
-		b.WriteByte('[')
-		for i, e := range n.Elems {
-			if i > 0 {
+	type frame struct {
+		n    *Node
+		next int // the next element or field to write
+	}
+	stack := []frame{{n: &n}}
+	for len(stack) > 0 {
+		f := &stack[len(stack)-1]
+		var child *Node
+		switch f.n.Kind {
+		case Null:
+			b.WriteString("null")
+		case Bool:
+			b.WriteString(strconv.FormatBool(f.n.Bool))
+		case Number:
+			b.WriteString(f.n.Number)
+		case String:
+			b.WriteString(strconv.Quote(f.n.Text))
+		case Array:
+			switch {
+			case f.next == 0:
+				b.WriteByte('[')
+			case f.next < len(f.n.Elems):
 				b.WriteByte(',')
 			}
-			e.canonical(b)
-		}
-		b.WriteByte(']')
-	case Object:
-		b.WriteByte('{')
-		for i, f := range n.Fields {
-			if i > 0 {
+			if f.next == len(f.n.Elems) {
+				b.WriteByte(']')
+				break
+			}
+			child = &f.n.Elems[f.next]
+		case Object:
+			switch {
+			case f.next == 0:
+				b.WriteByte('{')
+			case f.next < len(f.n.Fields):
 				b.WriteByte(',')
 			}
-			b.WriteString(strconv.Quote(f.Name))
+			if f.next == len(f.n.Fields) {
+				b.WriteByte('}')
+				break
+			}
+			b.WriteString(strconv.Quote(f.n.Fields[f.next].Name))
 			b.WriteByte(':')
-			f.Value.canonical(b)
+			child = &f.n.Fields[f.next].Value
 		}
-		b.WriteByte('}')
+		if child == nil { // this node is written
+			stack = stack[:len(stack)-1]
+			continue
+		}
+		f.next++
+		stack = append(stack, frame{n: child})
 	}
 }
 
@@ -113,16 +143,53 @@ type TreeOptions struct {
 // when both sides hold objects, and a Sequence merge of elements when both
 // hold arrays; a field deleted on one side and changed on the other is a
 // conflict at its path, where the result keeps the base.
+//
+// Tree merges values nested no deeper than MaxDepth; one nested deeper is
+// a conflict at the root, where the result keeps the base. It compares
+// each node of the three once.
 func Tree(base, ours, theirs Node, o TreeOptions) Result[Node] {
+	for _, n := range []*Node{&base, &ours, &theirs} {
+		if deeper(n, MaxDepth) {
+			return Result[Node]{Value: base, Conflicts: []Conflict{{Reason: fmt.Sprintf("nested past %d arrays and objects", MaxDepth)}}}
+		}
+	}
 	var r Result[Node]
 	v, _ := mergeNode(&r, nil, &base, &ours, &theirs, o)
 	r.Value = v
 	return r
 }
 
+// deeper reports whether n nests more than limit arrays and objects,
+// looking no deeper than that.
+func deeper(n *Node, limit int) bool {
+	if n.Kind != Array && n.Kind != Object {
+		return false
+	}
+	if limit == 0 {
+		return true
+	}
+	for i := range n.Elems {
+		if deeper(&n.Elems[i], limit-1) {
+			return true
+		}
+	}
+	for i := range n.Fields {
+		if deeper(&n.Fields[i].Value, limit-1) {
+			return true
+		}
+	}
+	return false
+}
+
 // mergeNode merges one position; nil is an absent value. It returns the
-// merged value and whether it is present.
+// merged value and whether it is present. Two objects over an object or
+// nothing merge field by field straight away: where two of the three are
+// equal the field merge yields exactly what comparing them first would,
+// and comparing whole subtrees at every level cost depth times size.
 func mergeNode(r *Result[Node], path Path, b, o, t *Node, opts TreeOptions) (Node, bool) {
+	if o != nil && t != nil && o.Kind == Object && t.Kind == Object && (b == nil || b.Kind == Object) {
+		return mergeFields(r, path, b, o, t, opts), true
+	}
 	switch {
 	case same(o, t):
 		return deref(o)
@@ -133,8 +200,6 @@ func mergeNode(r *Result[Node], path Path, b, o, t *Node, opts TreeOptions) (Nod
 	case o == nil || t == nil:
 		r.Conflicts = append(r.Conflicts, Conflict{Path: path, Reason: "deleted on one side and changed on the other"})
 		return deref(b)
-	case o.Kind == Object && t.Kind == Object && (b == nil || b.Kind == Object):
-		return mergeFields(r, path, b, o, t, opts), true
 	case o.Kind == Number && t.Kind == Number && (b == nil || b.Kind == Number) && opts.Counter != nil && opts.Counter(path):
 		return mergeCounter(r, path, b, o, t)
 	case b != nil && o.Kind == Array && t.Kind == Array && b.Kind == Array:
@@ -195,7 +260,43 @@ func same(a, b *Node) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.Equal(*b)
+	return equal(a, b)
+}
+
+// equal is whether two nodes are the same value, compared part by part
+// without building their text. Tree calls it only on values no deeper than
+// MaxDepth.
+func equal(a, b *Node) bool {
+	if a.Kind != b.Kind {
+		return false
+	}
+	switch a.Kind {
+	case Bool:
+		return a.Bool == b.Bool
+	case Number:
+		return a.Number == b.Number
+	case String:
+		return a.Text == b.Text
+	case Array:
+		if len(a.Elems) != len(b.Elems) {
+			return false
+		}
+		for i := range a.Elems {
+			if !equal(&a.Elems[i], &b.Elems[i]) {
+				return false
+			}
+		}
+	case Object:
+		if len(a.Fields) != len(b.Fields) {
+			return false
+		}
+		for i := range a.Fields {
+			if a.Fields[i].Name != b.Fields[i].Name || !equal(&a.Fields[i].Value, &b.Fields[i].Value) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func deref(n *Node) (Node, bool) {
@@ -225,6 +326,3 @@ func sortedKeys(m map[string]bool) []string {
 	sort.Strings(out)
 	return out
 }
-
-// MaxDepth is the deepest nesting of arrays and objects Tree merges.
-const MaxDepth = 64

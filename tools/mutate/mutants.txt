@@ -2046,3 +2046,40 @@ find: fields := make([]merge.Field, 0, p.members())
 replace: var fields []merge.Field
 pkg: ./model/document
 run: ^TestRegression_SE6_ParsingCostsMemoryInProportionToTheText$
+
+# input bounds: tree merges (#6)
+
+id: merge-tree-refuses-nesting-past-max-depth
+file: merge/tree.go
+find: if deeper(n, MaxDepth) {
+replace: if deeper(n, MaxDepth) && false {
+pkg: ./merge
+run: ^TestRegression_SE6_ATreeMergeRefusesNestingPastMaxDepth$
+
+id: merge-tree-depth-counts-every-level
+file: merge/tree.go
+find: if limit == 0 {\n\t\treturn true
+replace: if limit < 0 {\n\t\treturn true
+pkg: ./merge
+run: ^TestRegression_SE6_ATreeMergeRefusesNestingPastMaxDepth$
+
+id: merge-tree-compares-without-building-text
+file: merge/tree.go
+find: \treturn equal(a, b)\n
+replace: \treturn a.Equal(*b)\n
+pkg: ./merge
+run: ^TestRegression_SE6_ATreeMergeComparesEachNodeOnce$
+
+id: merge-tree-objects-merge-field-by-field
+file: merge/tree.go
+find: if o != nil && t != nil && o.Kind == Object && t.Kind == Object && (b == nil || b.Kind == Object) {
+replace: if false {
+pkg: ./merge
+run: ^TestTreesMergeByPath$
+
+id: merge-canonical-keeps-its-own-stack
+file: merge/tree.go
+find: \tstack := []frame{{n: &n}}\n\tfor len(stack) > 0 {
+replace: \tvar rec func(*Node)\n\trec = func(m *Node) {\n\t\tif m.Kind != Array {\n\t\t\tb.WriteString(m.Number)\n\t\t\treturn\n\t\t}\n\t\tb.WriteByte('[')\n\t\tfor i := range m.Elems {\n\t\t\tif i > 0 {\n\t\t\t\tb.WriteByte(',')\n\t\t\t}\n\t\t\trec(&m.Elems[i])\n\t\t}\n\t\tb.WriteByte(']')\n\t}\n\tif n.Kind == Array {\n\t\trec(&n)\n\t\treturn\n\t}\n\tstack := []frame{{n: &n}}\n\tfor len(stack) > 0 {
+pkg: ./merge
+run: ^TestRegression_SE6_CanonicalTakesNoStackInProportionToDepth$
