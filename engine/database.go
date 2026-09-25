@@ -39,7 +39,15 @@ type Database struct {
 
 	mu     sync.Mutex
 	closed bool
+
+	beforePublish func(members int) // a test seam: called before every publish of transactions
 }
+
+// maxBatch is the most transactions one publish carries.
+const maxBatch = 64
+
+// queued is how many calls wait in branch's commit queue.
+func (d *Database) queued(branch string) int { return 0 }
 
 // models is every model the engine registers, configured for one geometry.
 type models struct {

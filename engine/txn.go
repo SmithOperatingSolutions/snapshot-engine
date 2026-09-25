@@ -375,6 +375,9 @@ func (t *Txn) Commit(ctx context.Context) (err error) {
 		if t.beforeSwap != nil {
 			t.beforeSwap()
 		}
+		if t.s.db.beforePublish != nil {
+			t.s.db.beforePublish(1)
+		}
 		_, err = r.UpdateWorkingSet(ctx, t.s.p, t.s.branch, cur, next)
 		if !errors.Is(err, vcs.ErrConflict) {
 			return translate(err)

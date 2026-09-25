@@ -84,3 +84,15 @@ func MergeBranch(ctx context.Context, s *Session, from string) (int, error) {
 	res, err := s.db.r.Merge(ctx, s.p, s.branch, head.Hash)
 	return len(res.Conflicts), err
 }
+
+// MaxBatch is the most transactions one publish carries.
+const MaxBatch = maxBatch
+
+// SetBeforePublish makes every publish of transactions call f with how many
+// it carries, after the batch is built and just before its swap, on every
+// attempt.
+func SetBeforePublish(d *Database, f func(members int)) { d.beforePublish = f }
+
+// Queued is how many calls wait in branch's commit queue, the ones a
+// leader is publishing aside.
+func Queued(d *Database, branch string) int { return d.queued(branch) }
