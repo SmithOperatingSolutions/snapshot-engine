@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/SmithOperatingSolutions/snapshot-engine/engine"
@@ -116,6 +117,8 @@ type tally struct {
 	bytes                                int64
 	firstErr                             string
 	lat, commit                          hist
+	live                                 *atomic.Uint64 // when set, counts retries as they happen (W8's tick line)
+	incs, docIncs                        int64          // increments committed: table balances, document fields
 }
 
 func (t *tally) fail(err error) {
@@ -132,6 +135,8 @@ func (t *tally) merge(o *tally) {
 	t.gaveUp += o.gaveUp
 	t.errors += o.errors
 	t.bytes += o.bytes
+	t.incs += o.incs
+	t.docIncs += o.docIncs
 	if t.firstErr == "" {
 		t.firstErr = o.firstErr
 	}
@@ -190,6 +195,9 @@ func (s *suite) txn(sess *engine.Session, t *tally, rng *rand.Rand, readOnly boo
 			return false
 		}
 		t.retries++
+		if t.live != nil {
+			t.live.Add(1)
+		}
 		time.Sleep(time.Duration(rng.IntN(1+attempt)) * 200 * time.Microsecond)
 	}
 }

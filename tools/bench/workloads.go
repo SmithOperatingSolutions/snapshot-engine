@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -327,6 +328,10 @@ func (s *suite) w3() error {
 	if err := s.loadTable("people", s.sc.rows, s.sc.tableBatch, false); err != nil {
 		return err
 	}
+	sum, err := s.balances()
+	if err != nil {
+		return err
+	}
 	for _, dist := range []string{"uniform", "zipf1.1"} {
 		for _, conc := range s.sc.concs {
 			t, dur, err := s.parallel(conc, s.sc.phaseDur, func(sess *engine.Session, rng *rand.Rand, t *tally, deadline time.Time) error {
@@ -341,8 +346,13 @@ func (s *suite) w3() error {
 			if err != nil {
 				return err
 			}
+			after, err := s.balances()
+			if err != nil {
+				return err
+			}
 			r := t.result("W3", fmt.Sprintf("rmw %s, %d session(s)", dist, conc), "tx", dur)
-			r.note = "2-4 reads, 1-2 updates per tx"
+			r.note = "2-4 reads, 1-2 updates per tx; " + lostUpdates(sum, after, t.incs)
+			sum = after
 			s.record(r)
 		}
 	}
@@ -362,13 +372,14 @@ func (s *suite) picker(dist string, rng *rand.Rand) func() int64 {
 // rmw is one OLTP transaction: read 2 to 4 rows, add one to the balance of
 // 1 or 2 of them, commit (retrying a serialization failure).
 func (s *suite) rmw(sess *engine.Session, rng *rand.Rand, pick func() int64, t *tally) bool {
-	return s.txn(sess, t, rng, false, func(tx *engine.Txn) error {
+	var upd int // the updates of the attempt that committed
+	ok := s.txn(sess, t, rng, false, func(tx *engine.Txn) error {
 		tb, err := tx.Table(ctx, "people")
 		if err != nil {
 			return err
 		}
 		n := 2 + rng.IntN(3)
-		upd := 1 + rng.IntN(2)
+		upd = 1 + rng.IntN(2)
 		for i := 0; i < n; i++ {
 			key := engine.Key{pick()}
 			row, ok, err := tb.Get(ctx, key)
@@ -387,6 +398,76 @@ func (s *suite) rmw(sess *engine.Session, rng *rand.Rand, pick func() int64, t *
 		}
 		return nil
 	})
+	if ok {
+		t.incs += int64(upd)
+	}
+	return ok
+}
+
+// balances is the sum of every balance in people: the authority a phase of
+// read-modify-writes is checked against, since each committed update adds
+// exactly one.
+func (s *suite) balances() (int64, error) {
+	var sum int64
+	err := s.readOnly(func(tx *engine.Txn) error {
+		tb, err := tx.Table(ctx, "people")
+		if err != nil {
+			return err
+		}
+		return tb.Scan(ctx, func(_ engine.Key, r engine.Row) (bool, error) {
+			sum += r[7].(int64)
+			return true, nil
+		})
+	})
+	return sum, err
+}
+
+// docFields is the sum of every record's numeric fields n1 to n8: the
+// authority for document field updates.
+func (s *suite) docFields() (int64, error) {
+	var sum int64
+	err := s.readOnly(func(tx *engine.Txn) error {
+		c, err := tx.Collection(ctx, "docs")
+		if err != nil {
+			return err
+		}
+		return c.Scan(ctx, nil, func(id []byte, d engine.Node) (bool, error) {
+			for _, f := range d.Fields {
+				if len(f.Name) != 2 || f.Name[0] != 'n' {
+					continue
+				}
+				n, err := strconv.ParseInt(f.Value.Number, 10, 64)
+				if err != nil {
+					return false, fmt.Errorf("record %s field %s is %q, not an integer", id, f.Name, f.Value.Number)
+				}
+				sum += n
+			}
+			return true, nil
+		})
+	})
+	return sum, err
+}
+
+// readOnly runs f in a transaction on main that is rolled back.
+func (s *suite) readOnly(f func(tx *engine.Txn) error) error {
+	sess, err := s.session("main")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sess.Close() }()
+	tx, err := sess.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	return f(tx)
+}
+
+// lostUpdates says how many committed increments an authority does not
+// show: before plus what committed, less what is there now. Anything but
+// zero is a wrong result.
+func lostUpdates(before, after, committed int64) string {
+	return fmt.Sprintf("lost updates %d of %d", before+committed-after, committed)
 }
 
 // --- W4: a Redis-shaped kv mix ---
@@ -474,6 +555,10 @@ func (s *suite) w5() error {
 	if err := s.loadDocs(false); err != nil {
 		return err
 	}
+	sum, err := s.docFields()
+	if err != nil {
+		return err
+	}
 	for _, hot := range []int{s.sc.docs, 100} {
 		label := "uniform"
 		if hot < s.sc.docs {
@@ -490,7 +575,13 @@ func (s *suite) w5() error {
 		if err != nil {
 			return err
 		}
+		after, err := s.docFields()
+		if err != nil {
+			return err
+		}
 		r := t.result("W5", fmt.Sprintf("doc field update, %s, %d sess", label, s.sc.docConc), "tx", dur)
+		r.note = lostUpdates(sum, after, t.docIncs)
+		sum = after
 		s.record(r)
 	}
 	return nil
@@ -500,7 +591,7 @@ func (s *suite) w5() error {
 func (s *suite) docBump(sess *engine.Session, rng *rand.Rand, t *tally, among int) bool {
 	id := docID(rng.IntN(among))
 	field := fmt.Sprintf("n%d", 1+rng.IntN(8))
-	return s.txn(sess, t, rng, false, func(tx *engine.Txn) error {
+	ok := s.txn(sess, t, rng, false, func(tx *engine.Txn) error {
 		c, err := tx.Collection(ctx, "docs")
 		if err != nil {
 			return err
@@ -518,6 +609,10 @@ func (s *suite) docBump(sess *engine.Session, rng *rand.Rand, t *tally, among in
 		}
 		return c.Put(ctx, id, next)
 	})
+	if ok {
+		t.docIncs++
+	}
+	return ok
 }
 
 // --- W6: version control at scale ---
@@ -853,6 +948,14 @@ func (s *suite) w8() error {
 			return err
 		}
 	}
+	balBefore, err := s.balances()
+	if err != nil {
+		return err
+	}
+	docBefore, err := s.docFields()
+	if err != nil {
+		return err
+	}
 	var done, retried, failed atomic.Uint64
 	var commits, commitErrs atomic.Uint64
 	var commitLat hist
@@ -914,8 +1017,8 @@ func (s *suite) w8() error {
 	}()
 	t, dur, err := s.parallel(s.sc.mixConc, s.sc.mixDur, func(sess *engine.Session, rng *rand.Rand, t *tally, deadline time.Time) error {
 		pick := s.picker("uniform", rng)
+		t.live = &retried
 		for time.Now().Before(deadline) {
-			before := t.retries
 			var ok bool
 			switch r := rng.IntN(100); {
 			case r < 50:
@@ -928,7 +1031,6 @@ func (s *suite) w8() error {
 			default:
 				ok = s.docBump(sess, rng, t, s.sc.docs)
 			}
-			retried.Add(t.retries - before)
 			if ok {
 				t.ops++
 				done.Add(1)
@@ -943,8 +1045,17 @@ func (s *suite) w8() error {
 	if err != nil {
 		return err
 	}
+	balAfter, err := s.balances()
+	if err != nil {
+		return err
+	}
+	docAfter, err := s.docFields()
+	if err != nil {
+		return err
+	}
 	r := t.result("W8", fmt.Sprintf("mixed 50/30/20 table/kv/doc, %d sess", s.sc.mixConc), "tx", dur)
-	r.note = fmt.Sprintf("session commits %d (err %d), commit p50 %s ms p99 %s ms", commits.Load(), commitErrs.Load(), ms(commitLat.quantile(.5)), ms(commitLat.quantile(.99)))
+	r.note = fmt.Sprintf("session commits %d (err %d), commit p50 %s ms p99 %s ms; table %s; documents %s", commits.Load(), commitErrs.Load(),
+		ms(commitLat.quantile(.5)), ms(commitLat.quantile(.99)), lostUpdates(balBefore, balAfter, t.incs), lostUpdates(docBefore, docAfter, t.docIncs))
 	s.record(r)
 	return nil
 }
