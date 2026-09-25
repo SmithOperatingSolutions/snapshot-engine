@@ -32,8 +32,9 @@ type Model struct {
 }
 
 var (
-	_ model.Model  = Model{}
-	_ model.Walker = Model{}
+	_ model.Model       = Model{}
+	_ model.Walker      = Model{}
+	_ model.Accumulator = Model{}
 )
 
 // ID implements model.Model.
@@ -42,10 +43,26 @@ func (Model) ID() model.ID { return ID }
 // FormatVersion implements model.Model.
 func (Model) FormatVersion() uint16 { return Format }
 
+// Accumulates implements model.Accumulator: a counter both sides changed
+// alike is two changes, whose deltas both count.
+func (Model) Accumulates() bool { return true }
+
+// maxFrame is the longest value frame: the kind byte and the longest
+// payload.
+const maxFrame = 1 + MaxValueSize
+
+// config is c for a kv map: no frame is longer than maxFrame, so no longer
+// value is read, a stream's claimed length being able to pass what it
+// stores many times over (snapshot-core#23).
+func config(c prolly.Config) prolly.Config {
+	c.MaxValue = maxFrame
+	return c
+}
+
 // spec is kv as a map-shaped model: a map from key to value frame under a
 // configuration, its records checked as keys of ours holding frames of ours.
 func spec(c prolly.Config) mapobject.Spec {
-	return mapobject.Spec{Name: "kv", Format: Format, Config: c, Check: func(key, frame []byte) error {
+	return mapobject.Spec{Name: "kv", Format: Format, Config: config(c), Check: func(key, frame []byte) error {
 		_, err := checked(key, frame)
 		return err
 	}}

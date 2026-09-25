@@ -346,10 +346,8 @@ func TestACollectionHandleReadsItsWritesAndRefusesWhatIsNotADocument(t *testing.
 
 // Transactions on one kv map conflict by key: different keys both commit;
 // one key set two ways serializes, the second's write absent; a counter
-// incremented in two transactions serializes too, as any key written twice
-// does (a counter's increments will sum again once the core asks the kv
-// model about identical changes; until then the second transaction
-// retries).
+// incremented in two transactions is the exception, both commit and the
+// increments sum (DESIGN D18, #7).
 func TestTransactionsOnOneKVMapConflictByKey(t *testing.T) {
 	_, s := kindsDB(t)
 	a, b := txnBegin(t, s), txnBegin(t, s)
@@ -403,11 +401,11 @@ func TestTransactionsOnOneKVMapConflictByKey(t *testing.T) {
 	if err := e.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Commit(ctx); !errors.Is(err, engine.ErrSerialization) {
-		t.Errorf("a second increment of a counter the first incremented = %v, want ErrSerialization", err)
+	if err := f.Commit(ctx); err != nil {
+		t.Errorf("a second increment of a counter the first incremented = %v, want it to commit: increments sum", err)
 	}
-	if v, _ := kindsGet(t, s, "hits"); v.Counter != 11 {
-		t.Errorf("a counter at 10 incremented by 1, then by 2 in a transaction that could not commit, is %d, want 11", v.Counter)
+	if v, _ := kindsGet(t, s, "hits"); v.Counter != 13 {
+		t.Errorf("a counter at 10 incremented by 1 and by 2 in two transactions is %d, want 13", v.Counter)
 	}
 }
 

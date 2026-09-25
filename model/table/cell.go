@@ -669,3 +669,22 @@ func decodeCell(b []byte, c Column) (any, []byte, error) {
 	}
 	return v, b, nil
 }
+
+// maxCell is the longest cell column c can hold: a fixed-width type's
+// width, the 0x01 before it included (NULL, one byte, is never longer),
+// and MaxCellLen for any other type.
+func maxCell(c Column) int {
+	switch c.Type {
+	case TypeBool:
+		return 1 + 1
+	case TypeInt2:
+		return 1 + 2
+	case TypeInt4, TypeFloat4, TypeDate:
+		return 1 + 4
+	case TypeInt8, TypeFloat8, TypeTimestamp, TypeTimestampTZ:
+		return 1 + 8
+	case TypeUUID:
+		return 1 + len(UUID{})
+	}
+	return MaxCellLen
+}

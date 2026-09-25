@@ -21,7 +21,7 @@ type Collection struct {
 
 // Empty is a new, empty collection.
 func Empty(ctx context.Context, s chunk.ReadWriter, c prolly.Config) (*Collection, error) {
-	m, err := prolly.Empty(ctx, s, c)
+	m, err := prolly.Empty(ctx, s, config(c))
 	if err != nil {
 		return nil, err
 	}

@@ -43,11 +43,19 @@ func (Model) ID() model.ID { return ID }
 // FormatVersion implements model.Model.
 func (Model) FormatVersion() uint16 { return Format }
 
+// config is c for a collection's map: no record is longer than MaxRecord,
+// so no longer value is read, a stream's claimed length being able to pass
+// what it stores many times over (snapshot-core#23).
+func config(c prolly.Config) prolly.Config {
+	c.MaxValue = MaxRecord
+	return c
+}
+
 // spec is the collection as a map-shaped model: a map from record id to
 // record frame under a configuration, its records checked as ids of ours
 // holding frames of ours.
 func spec(c prolly.Config) mapobject.Spec {
-	return mapobject.Spec{Name: "document", Format: Format, Config: c, Check: func(id, frame []byte) error {
+	return mapobject.Spec{Name: "document", Format: Format, Config: config(c), Check: func(id, frame []byte) error {
 		_, err := checked(id, frame)
 		return err
 	}}

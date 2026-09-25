@@ -2220,3 +2220,168 @@ find: \tif b.inner == nil {\n\t\treturn auth.ErrDenied
 replace: \tif b.inner == nil {\n\t\treturn nil
 pkg: ./engine
 run: ^TestABatchIsAllowedOnlyWhatItsMembersWere$
+
+# model value limits (#7)
+
+id: kv-map-reads-no-value-past-a-frame
+file: model/kv/kv.go
+find: c.MaxValue = maxFrame
+replace: c.MaxValue = maxFrame + 1
+pkg: ./model/kv
+run: ^TestRegression_SE7_AKVObjectReadsNoValueLongerThanAFrame$
+
+id: kv-map-limit-applies-to-the-spec
+file: model/kv/kv.go
+find: Format: Format, Config: config(c), Check
+replace: Format: Format, Config: c, Check
+pkg: ./model/kv
+run: ^TestRegression_SE7_AKVObjectReadsNoValueLongerThanAFrame$
+
+id: kv-map-holds-the-longest-frame
+file: model/kv/kv.go
+find: c.MaxValue = maxFrame
+replace: c.MaxValue = maxFrame - 1
+pkg: ./model/kv
+run: ^TestRegression_SE7_AKVObjectReadsNoValueLongerThanAFrame$
+
+id: document-map-reads-no-record-past-max-record
+file: model/document/document.go
+find: c.MaxValue = MaxRecord
+replace: c.MaxValue = MaxRecord + 1
+pkg: ./model/document
+run: ^TestRegression_SE7_ACollectionReadsNoRecordLongerThanMaxRecord$
+
+id: document-map-holds-the-longest-record
+file: model/document/document.go
+find: c.MaxValue = MaxRecord
+replace: c.MaxValue = MaxRecord - 1
+pkg: ./model/document
+run: ^TestRegression_SE7_ACollectionReadsNoRecordLongerThanMaxRecord$
+
+id: document-map-limit-applies-to-the-spec
+file: model/document/document.go
+find: Format: Format, Config: config(c), Check
+replace: Format: Format, Config: c, Check
+pkg: ./model/document
+run: ^TestRegression_SE7_ACollectionReadsNoRecordLongerThanMaxRecord$
+
+id: table-a-fixed-cell-is-its-width
+file: model/table/cell.go
+find: case TypeInt4, TypeFloat4, TypeDate:\n\t\treturn 1 + 4
+replace: case TypeInt4, TypeFloat4, TypeDate:\n\t\treturn 1 + 3
+pkg: ./model/table
+run: ^TestRegression_SE7_ACellsLongestIsItsTypesWidth$
+
+id: table-a-fixed-cell-is-no-longer-than-its-width
+file: model/table/cell.go
+find: case TypeInt8, TypeFloat8, TypeTimestamp, TypeTimestampTZ:\n\t\treturn 1 + 8
+replace: case TypeInt8, TypeFloat8, TypeTimestamp, TypeTimestampTZ:\n\t\treturn 1 + 9
+pkg: ./model/table
+run: ^TestRegression_SE7_ACellsLongestIsItsTypesWidth$
+
+id: table-a-uuid-cell-is-its-width
+file: model/table/cell.go
+find: return 1 + len(UUID{})
+replace: return len(UUID{})
+pkg: ./model/table
+run: ^TestRegression_SE7_ACellsLongestIsItsTypesWidth$
+
+id: table-a-row-counts-each-cell-at-its-longest
+file: model/table/store.go
+find: n += maxCell(c)
+replace: n += MaxCellLen
+pkg: ./model/table
+run: ^TestRegression_SE7_ATableReadsNoRowLongerThanItsSchemaHolds$
+
+id: table-a-row-leaves-its-key-cells-out
+file: model/table/store.go
+find: if !schema.isKey(c.Tag) {\n\t\t\tn += maxCell(c)
+replace: if true {\n\t\t\tn += maxCell(c)
+pkg: ./model/table
+run: ^TestRegression_SE7_ATableReadsNoRowLongerThanItsSchemaHolds$
+
+id: table-a-row-is-read-to-its-schemas-longest
+file: model/table/store.go
+find: cfg.MaxValue = max(n, 1)
+replace: cfg.MaxValue = max(n, 1) + 1
+pkg: ./model/table
+run: ^TestRegression_SE7_ATableReadsNoRowLongerThanItsSchemaHolds$
+
+id: table-a-row-at-its-schemas-longest-is-read
+file: model/table/store.go
+find: cfg.MaxValue = max(n, 1)
+replace: cfg.MaxValue = max(n, 1) - 1
+pkg: ./model/table
+run: ^TestRegression_SE7_ATableReadsNoRowLongerThanItsSchemaHolds$
+
+id: table-an-index-value-is-empty
+file: model/table/store.go
+find: cfg.MaxValue = 1\n
+replace: cfg.MaxValue = 0\n
+pkg: ./model/table
+run: ^TestRegression_SE7_ATableReadsNoRowLongerThanItsSchemaHolds$
+
+id: table-an-opened-table-reads-rows-to-its-limit
+file: model/table/store.go
+find: openMap(ctx, s, rowConfig(cfg, schema), r.primary)
+replace: openMap(ctx, s, cfg, r.primary)
+pkg: ./model/table
+run: ^TestRegression_SE7_ATableReadsNoRowLongerThanItsSchemaHolds$
+
+id: table-an-opened-table-reads-index-entries-to-their-limit
+file: model/table/store.go
+find: openMap(ctx, s, indexConfig(cfg), r.indexes[i])
+replace: openMap(ctx, s, cfg, r.indexes[i])
+pkg: ./model/table
+run: ^TestRegression_SE7_ATableReadsNoRowLongerThanItsSchemaHolds$
+
+id: table-a-key-only-row-is-limited-to-a-byte
+file: model/table/store.go
+find: cfg.MaxValue = max(n, 1)
+replace: cfg.MaxValue = n
+pkg: ./model/table
+run: ^TestRegression_SE7_AKeyOnlyTableReadsNoRowValue$
+
+# counters sum (#7)
+
+id: kv-accumulates
+file: model/kv/kv.go
+find: func (Model) Accumulates() bool { return true }
+replace: func (Model) Accumulates() bool { return false }
+pkg: ./engine
+run: ^TestACounterIncrementedOnTwoBranchesMergesToTheSum$
+
+id: engine-counters-leave-the-item-rule
+file: engine/txn.go
+find: \t\tif counter {\n\t\t\tdelete(written, key)
+replace: \t\tif false {\n\t\t\tdelete(written, key)
+pkg: ./engine
+run: ^TestConcurrentIncrementsOfOneCounterBothCommit$
+
+id: engine-counters-are-a-kv-objects-keys
+file: engine/txn.go
+find: if m.To.Model == kv.ID {\n\t\t\tif err := t.counterDeltas
+replace: if false {\n\t\t\tif err := t.counterDeltas
+pkg: ./engine
+run: ^TestConcurrentIncrementsOfOneCounterBothCommit$
+
+id: engine-only-counters-leave-the-item-rule
+file: engine/txn.go
+find: counter = counter && ok && v.Kind == kv.Counter
+replace: counter = counter && ok && v.Kind == v.Kind
+pkg: ./engine
+run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
+
+id: engine-a-counter-delta-was-a-counter
+file: engine/txn.go
+find: for i, root := range []model.Root{c.From.Root, c.To.Root} {
+replace: for i, root := range []model.Root{c.To.Root, c.To.Root} {
+pkg: ./engine
+run: ^TestACounterSetOrDeletedWhileIncrementedStillSerializes$
+
+id: engine-a-counter-delta-is-a-counter
+file: engine/txn.go
+find: for i, root := range []model.Root{c.From.Root, c.To.Root} {
+replace: for i, root := range []model.Root{c.From.Root, c.From.Root} {
+pkg: ./engine
+run: ^TestACounterSetOrDeletedWhileIncrementedStillSerializes$

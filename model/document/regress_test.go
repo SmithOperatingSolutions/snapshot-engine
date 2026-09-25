@@ -13,6 +13,7 @@ import (
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk/memstore"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/hash"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/model"
+	"github.com/SmithOperatingSolutions/snapshot-core/core/prolly"
 
 	"github.com/SmithOperatingSolutions/snapshot-engine/merge"
 	"github.com/SmithOperatingSolutions/snapshot-engine/model/document"
@@ -178,5 +179,89 @@ func TestRegression_SE6_ADocumentPastTheLimitOnceCanonicalIsRefusedAsItIsParsed(
 	}
 	if grew := after.TotalAlloc - before.TotalAlloc; grew > 4<<20 {
 		t.Errorf("refusing %d bytes of 1e999 allocated %d bytes: a document is built out past its limit before it is refused", len(text), grew)
+	}
+}
+
+// allocated is how many bytes f allocated, by the runtime's own count.
+func allocated(f func()) uint64 {
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	f()
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc
+}
+
+// documentReads are the ways a collection's records are read: whole,
+// validated, walked for GC, diffed from base, and one id at a time.
+func documentReads(s *memstore.Store, base model.Root, id string) map[string]func(model.Root) error {
+	mdl := document.Model{Config: cfg()}
+	return map[string]func(model.Root) error{
+		"Read":     func(r model.Root) error { _, err := document.Read(ctx, s, cfg(), r); return err },
+		"Validate": func(r model.Root) error { return mdl.Validate(ctx, r, s) },
+		"Walk": func(r model.Root) error {
+			return mdl.Walk(ctx, r, s, func(hash.Hash, bool) (bool, error) { return true, nil })
+		},
+		"Diff": func(r model.Root) error {
+			d, err := mdl.Diff(ctx, base, r, s)
+			for err == nil {
+				var ok bool
+				if _, ok, err = d.Next(ctx); !ok {
+					break
+				}
+			}
+			return err
+		},
+		"Get": func(r model.Root) error {
+			c, err := document.Open(ctx, s, cfg(), r)
+			if err == nil {
+				_, _, err = c.Get(ctx, []byte(id))
+			}
+			return err
+		},
+	}
+}
+
+// A record is at most MaxRecord bytes, the frame byte and a document at
+// the text limit, so a stream longer than that is not one of ours, and a
+// stream's claimed length can be many times what it stores
+// (snapshot-core#23). A collection holding a record one byte longer must
+// be refused, by every read, with prolly.ErrValueTooLarge and before the
+// stream is read; the longest record there is reads back by every read
+// (snapshot-engine#7).
+func TestRegression_SE7_ACollectionReadsNoRecordLongerThanMaxRecord(t *testing.T) {
+	s := memstore.New()
+	small := map[string]merge.Node{"a": {Kind: merge.String, Text: "x"}}
+	base := write(t, s, small)
+	longest := merge.Node{Kind: merge.String, Text: strings.Repeat("m", document.MaxDocument-2)} // quoted: MaxDocument bytes of text
+	good := write(t, s, map[string]merge.Node{"a": small["a"], "max": longest})
+
+	wide := cfg()
+	wide.MaxValue = 8 << 20
+	m, err := prolly.Open(ctx, s, wide, base.Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := m.Editor()
+	if err := e.Put([]byte("max"), append([]byte{document.Format, '"'}, strings.Repeat("o", document.MaxDocument-1)+`"`...)); err != nil {
+		t.Fatal(err)
+	}
+	if m, err = e.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	over := model.Root{Hash: m.Root(), Size: m.Count(), Format: document.Format}
+
+	if got, err := document.Read(ctx, s, cfg(), good); err != nil || got["max"].Text != longest.Text {
+		t.Fatalf("positive control: the collection holding the longest record, %d bytes, read back as %d characters, %v", document.MaxRecord, len(got["max"].Text), err)
+	}
+	for how, read := range documentReads(s, base, "max") {
+		if err := read(good); err != nil {
+			t.Fatalf("positive control: %s of the collection holding the longest record, %d bytes: %v", how, document.MaxRecord, err)
+		}
+		var err error
+		used := allocated(func() { err = read(over) })
+		if !errors.Is(err, prolly.ErrValueTooLarge) || used > 64<<10 {
+			t.Errorf("%s of a collection holding a %d-byte record, one byte over the longest, allocated %d bytes and returned %v; want prolly.ErrValueTooLarge within 64 KiB: a forged stream is read before it is refused",
+				how, document.MaxRecord+1, used, err)
+		}
 	}
 }
