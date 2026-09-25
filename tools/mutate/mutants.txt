@@ -1972,3 +1972,19 @@ find: out := map[string]merge.Node{} // grown as records are read
 replace: out := make(map[string]merge.Node, col.m.Count()) // grown as records are read
 pkg: ./model/document
 run: ^TestRegression_SE5_ReadingACollectionSizesNothingFromItsRootsClaim$
+
+# input bounds: sequence alignment (#4)
+
+id: merge-sequence-edit-budget-is-the-limit
+file: merge/sequence.go
+find: const MaxSequenceEdits = 1000
+replace: const MaxSequenceEdits = 1001
+pkg: ./merge
+run: ^TestRegression_SE4_ASequenceMergePastTheEditBudgetIsAConflict$
+
+id: merge-sequence-an-unchanged-side-yields
+file: merge/sequence.go
+find: case equalKeys(kt, kb), equalKeys(ko, kt):\n\t\treturn Result[[]T]{Value: append([]T(nil), ours...)}
+replace: case equalKeys(ko, kt):\n\t\treturn Result[[]T]{Value: append([]T(nil), ours...)}
+pkg: ./merge
+run: ^TestRegression_SE4_ASequenceMergePastTheEditBudgetIsAConflict$

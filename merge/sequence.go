@@ -1,6 +1,16 @@
 package merge
 
-import "strconv"
+import (
+	"fmt"
+	"strconv"
+)
+
+// MaxSequenceEdits is the most insertions and deletions (a replaced
+// element is one of each) Sequence aligns between the base and either
+// side. Past it the merge is a conflict at the list, never an allocation
+// or a search that grows with the square of the list (DESIGN D18,
+// snapshot-engine#4).
+const MaxSequenceEdits = 1000
 
 // Sequence merges two sides of an ordered list, as diff3 does: elements are
 // identified by key, stretches between elements all three lists share are
@@ -8,10 +18,24 @@ import "strconv"
 // the other; equal changes land once), both sides inserting at one position
 // keep both blocks in the order of their keys and flag the position, and two
 // different changes to one stretch are a conflict at its position, where the
-// result keeps the base.
+// result keeps the base. A side more than MaxSequenceEdits insertions and
+// deletions from the base, when the other side changed the list too, is a
+// conflict at the list (an empty Path), where the result keeps the base.
 func Sequence[T any](base, ours, theirs []T, key func(T) string) Result[[]T] {
 	kb, ko, kt := keysOf(base, key), keysOf(ours, key), keysOf(theirs, key)
-	mo, mt := align(kb, ko), align(kb, kt)
+	switch { // a side that left the list as it was yields to the other, whatever it did
+	case equalKeys(kt, kb), equalKeys(ko, kt):
+		return Result[[]T]{Value: append([]T(nil), ours...)}
+	case equalKeys(ko, kb):
+		return Result[[]T]{Value: append([]T(nil), theirs...)}
+	}
+	mo, okO := align(kb, ko)
+	mt, okT := align(kb, kt)
+	if !okO || !okT {
+		return Result[[]T]{Value: append([]T(nil), base...), Conflicts: []Conflict{{
+			Reason: fmt.Sprintf("a side changed the list by more than %d insertions and deletions, too many to align", MaxSequenceEdits),
+		}}}
+	}
 	var r Result[[]T]
 	i, j, k := 0, 0, 0
 	for {
@@ -36,14 +60,16 @@ func Sequence[T any](base, ours, theirs []T, key func(T) string) Result[[]T] {
 // resolve appends the merge of one unstable stretch, at the position the
 // result has reached.
 func resolve[T any](r *Result[[]T], b, o, t []T, kb, ko, kt []string) {
-	at := Path{strconv.Itoa(len(r.Value))}
 	switch {
 	case equalKeys(ko, kb):
 		r.Value = append(r.Value, t...)
-	case equalKeys(kt, kb):
+		return
+	case equalKeys(kt, kb), equalKeys(ko, kt):
 		r.Value = append(r.Value, o...)
-	case equalKeys(ko, kt):
-		r.Value = append(r.Value, o...)
+		return
+	}
+	at := Path{strconv.Itoa(len(r.Value))} // named only where a flag or a conflict needs it
+	switch {
 	case len(b) == 0: // both inserted here: both blocks, in key order
 		if lessKeys(ko, kt) {
 			r.Value = append(append(r.Value, o...), t...)
@@ -90,41 +116,117 @@ func lessKeys(a, b []string) bool {
 }
 
 // align matches base to side by a longest common subsequence of keys: for
-// each base position, the side position it is matched to, or -1.
-func align(base, side []string) []int {
-	n, m := len(base), len(side)
-	lcs := make([][]int, n+1)
-	for i := range lcs {
-		lcs[i] = make([]int, m+1)
+// each base position, the side position it is matched to, or -1. It is
+// Myers' difference algorithm in linear space (the middle snake, divide
+// and conquer) over the keys interned as integers, after the common prefix
+// and suffix: memory in proportion to the lists, work at most about
+// (n+m)·MaxSequenceEdits. It reports false, having done no more than that,
+// when the side is more than MaxSequenceEdits insertions and deletions
+// from the base.
+func align(base, side []string) ([]int, bool) {
+	ids := make(map[string]int, len(base))
+	intern := func(ks []string) []int {
+		out := make([]int, len(ks))
+		for i, k := range ks {
+			id, ok := ids[k]
+			if !ok {
+				id = len(ids)
+				ids[k] = id
+			}
+			out[i] = id
+		}
+		return out
 	}
-	for i := n - 1; i >= 0; i-- {
-		for j := m - 1; j >= 0; j-- {
-			if base[i] == side[j] {
-				lcs[i][j] = lcs[i+1][j+1] + 1
-			} else {
-				lcs[i][j] = max(lcs[i+1][j], lcs[i][j+1])
+	half := (min(len(base)+len(side), MaxSequenceEdits) + 1) / 2
+	s := aligner{a: intern(base), b: intern(side), out: make([]int, len(base)), off: half + 1}
+	for i := range s.out {
+		s.out[i] = -1
+	}
+	s.fwd, s.bwd = make([]int, 2*s.off+1), make([]int, 2*s.off+1)
+	if !s.diff(0, len(base), 0, len(side), MaxSequenceEdits) {
+		return nil, false
+	}
+	return s.out, true
+}
+
+// aligner holds one alignment: the keys, the matches found so far, and the
+// furthest-reaching paths of the middle-snake search, by diagonal k at
+// index off+k.
+type aligner struct {
+	a, b     []int
+	out      []int
+	fwd, bwd []int
+	off      int
+}
+
+// diff matches a[x0:x1] against b[y0:y1], which differ by at most limit
+// insertions and deletions, or reports false.
+func (s *aligner) diff(x0, x1, y0, y1, limit int) bool {
+	for x0 < x1 && y0 < y1 && s.a[x0] == s.b[y0] {
+		s.out[x0] = y0
+		x0, y0 = x0+1, y0+1
+	}
+	for x0 < x1 && y0 < y1 && s.a[x1-1] == s.b[y1-1] {
+		x1, y1 = x1-1, y1-1
+		s.out[x1] = y1
+	}
+	if x0 == x1 || y0 == y1 { // what is left is all insertions or all deletions
+		return true
+	}
+	d, sx, sy, ex, ey := s.middle(x0, x1, y0, y1)
+	if d > limit {
+		return false
+	}
+	for x, y := sx, sy; x < ex; x, y = x+1, y+1 {
+		s.out[x] = y
+	}
+	// With the common ends gone d is at least 2, and each half holds fewer
+	// than d edits, so the recursion ends, about log2(d) deep.
+	return s.diff(x0, sx, y0, sy, d) && s.diff(ex, x1, ey, y1, d)
+}
+
+// middle finds the middle snake of a[x0:x1] against b[y0:y1]: the length d
+// of a shortest edit script, and a run of matches (sx,sy)-(ex,ey) that one
+// such script passes through with about half its edits on either side.
+// It searches no further than the arrays reach, MaxSequenceEdits, and
+// returns a d past that when the script is longer.
+func (s *aligner) middle(x0, x1, y0, y1 int) (d, sx, sy, ex, ey int) {
+	n, m := x1-x0, y1-y0
+	delta := n - m
+	odd := delta&1 != 0
+	fwd, bwd, off := s.fwd, s.bwd, s.off
+	fwd[off+1], bwd[off+1] = 0, 0
+	for dd := 0; dd < off; dd++ {
+		for k := -dd; k <= dd; k += 2 {
+			x := fwd[off+k+1]
+			if k != -dd && (k == dd || fwd[off+k-1] >= fwd[off+k+1]) {
+				x = fwd[off+k-1] + 1
+			}
+			y := x - k
+			bx, by := x, y
+			for x < n && y < m && s.a[x0+x] == s.b[y0+y] {
+				x, y = x+1, y+1
+			}
+			fwd[off+k] = x
+			if kr := delta - k; odd && kr >= -(dd-1) && kr <= dd-1 && x+bwd[off+kr] >= n {
+				return 2*dd - 1, x0 + bx, y0 + by, x0 + x, y0 + y
+			}
+		}
+		for k := -dd; k <= dd; k += 2 {
+			x := bwd[off+k+1]
+			if k != -dd && (k == dd || bwd[off+k-1] >= bwd[off+k+1]) {
+				x = bwd[off+k-1] + 1
+			}
+			y := x - k
+			bx, by := x, y
+			for x < n && y < m && s.a[x1-1-x] == s.b[y1-1-y] {
+				x, y = x+1, y+1
+			}
+			bwd[off+k] = x
+			if kf := delta - k; !odd && kf >= -dd && kf <= dd && x+fwd[off+kf] >= n {
+				return 2 * dd, x1 - x, y1 - y, x1 - bx, y1 - by
 			}
 		}
 	}
-	out := make([]int, n)
-	for i := range out {
-		out[i] = -1
-	}
-	for i, j := 0, 0; i < n && j < m; {
-		switch {
-		case base[i] == side[j]:
-			out[i] = j
-			i++
-			j++
-		case lcs[i+1][j] >= lcs[i][j+1]:
-			i++
-		default:
-			j++
-		}
-	}
-	return out
+	return MaxSequenceEdits + 1, 0, 0, 0, 0
 }
-
-// MaxSequenceEdits is the most insertions and deletions Sequence aligns
-// between the base and either side.
-const MaxSequenceEdits = 1000
