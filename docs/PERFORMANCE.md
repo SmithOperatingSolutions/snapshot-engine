@@ -10,8 +10,8 @@ Status: interim. The full sweep below found the problems. A
 correctness-first ladder followed: tiny scale under the race detector
 (item 1 below), each failure turned into a test and fixed, then 1k to 1M
 rows and 1 to 64 sessions in steps ("Scaling in steps", after the
-baseline). The full-scale and sustained runs are repeated last, as
-validation.
+baseline). The full-scale and sustained runs were repeated last, as
+validation ("Validation", after that).
 
 ## Broken under load: read this first
 
@@ -294,6 +294,19 @@ transaction gave up, and no increment was lost at any step. At a million
 rows, 96% of blocked time is on the packstore's commit lock and the item
 check itself costs 4.2% of CPU. The ceiling is the single root swap
 (item 2 above and changes 1, 3 and 4 below), not the data or the rule.
+
+## Validation
+
+The full sweep again, both backends, with the item rule, each run under
+the shared measurement lock. Every phase's authority check came back
+clean: no lost update of a balance, a document field or a counter, and no
+error. Throughput matches the baseline within noise. W3 runs at 26.5,
+12.9, 4.3 and 1.7 tx/s on disk at 1, 4, 16 and 64 sessions, and at 213,
+112, 30.3 and 3.2 in memory. On Zipf keys, 12 to 17% of serialization
+failures are now real conflicts, retried and committed. The sustained mix
+still collapses: 1.0 tx/s on disk and 1.7 in memory at 64 sessions, with
+42 and 14 transactions giving up after 50 retries. That is the root swap,
+which the ranked changes address.
 
 ## Where the time goes
 
