@@ -6,28 +6,35 @@ program that drives a database through `engine/` alone, as an adapter
 would (depguard holds it to that). Baseline taken 2026-09-25 on
 snapshot-core v0.1.1. This is a measurement: nothing here was optimized.
 
-Status: interim. The full sweep below found the problems; what follows it
-is a correctness-first ladder (tiny scale under the race detector, each
-failure turned into a test and fixed, then 1k to 1M rows and 1 to 64
-sessions in steps), and this document grows with it.
+Status: interim. The full sweep below found the problems. A
+correctness-first ladder followed: tiny scale under the race detector
+(item 1 below), each failure turned into a test and fixed, then 1k to 1M
+rows and 1 to 64 sessions in steps ("Scaling in steps", after the
+baseline). The full-scale and sustained runs are repeated last, as
+validation.
 
 ## Broken under load: read this first
 
-1. **Concurrent transactions lose updates.** Two transactions that read
-   the same value and write it back changed (a balance from 1000 to 1001)
-   both commit, and one increment is gone. The second commit finds the
-   working set moved, merges three ways, and the merge takes a change both
-   sides made identically as clean. A table cell, a kv bytes value and a
-   document field all lose the update; a kv counter does not (it merges by
-   summing, by design). Under load:
+1. **Concurrent transactions lost updates. Fixed on this branch.** Two
+   transactions that read the same value and wrote it back changed (a
+   balance from 1000 to 1001) both committed, and one increment was gone.
+   The second commit found the working set moved, merged three ways, and
+   the merge took a change both sides made identically as clean. A table
+   cell, a kv bytes value, a document field and a kv counter all lost the
+   update. The counter lost it because the core takes two identical object
+   roots as one change before the kv model can sum the deltas; that
+   happens when the counter is the only change on both sides, as in W4's
+   one-op INCR. Before the fix, under load:
 
    | Where | Disk | Memory |
    | --- | ---: | ---: |
-   | Two sessions, one value, one increment each (the smallest case: a table cell, a kv bytes value, a document field) | not run | 1 of 2, each kind |
+   | Two sessions, one value, one increment each (the smallest case: a table cell, a kv bytes value, a document field, a counter) | not run | 1 of 2, each kind |
    | W3 uniform keys over 1M rows, 1 to 64 sessions | 0 | 0 |
    | W3 Zipf 1.1, 4 sessions | 2 of 632 | 32 of 1,584 |
    | W3 Zipf 1.1, 16 sessions | 2 of 222 | 17 of 449 |
    | W3 Zipf 1.1, 64 sessions | 7 of 151 | 12 of 176 |
+   | W3 Zipf 1.1 over 1,000 rows, 2 sessions (race detector) | 6 of 568 | 27 of 1,117 |
+   | W4 counters, one op per transaction, 2 sessions over 1,000 keys (race detector) | 0 of 93 | 3 of 159 |
    | W5, uniform and 100 hot records, 16 sessions | 0 of 236 | 0 of 501 |
    | W8 table and documents, 64 sessions | 0 of 284 | 0 of 500 |
 
@@ -35,17 +42,24 @@ sessions in steps), and this document grows with it.
    (before, plus what committed, less what is there after; the bench reads
    the sums with a full scan around each phase). Collisions need two
    transactions on one item at once, so they appear where keys are hot and
-   commits frequent; at the commit rates of W5 and W8 (a few a second, see
-   item 2) there were none to see.
+   commits frequent.
 
-   The Engine Spec promises snapshot isolation (engine-spec.md, Transactions)
-   and, in the same paragraph, that a clean merge commits; snapshot
-   isolation forbids lost updates (the second writer of an item fails), so
-   the two rules disagree exactly here. Which one wins, and at what grain
-   (a key, a row, a cell, a field), is a decision for the spec. Whatever it
-   is, fixing it makes hot-key workloads fail more often with
-   `ErrSerialization`, as they would on PostgreSQL at REPEATABLE READ; the
-   bench will show the cost.
+   The Engine Spec promises snapshot isolation and, in the same paragraph,
+   that a clean merge commits; snapshot isolation forbids lost updates, so
+   the two rules disagreed exactly here. The user decided the grain: a
+   transaction is the one writer of an item (a table row, a kv key, a
+   document record) until it commits, counters included for now (DESIGN
+   D18 on main). `Txn.Commit` now refuses an item both sides wrote before
+   it merges, whatever the values; branch merges still combine cells and
+   fields. Counters will sum again once the core asks models about
+   identical changes. After the fix, the race-detector runs (1,000 and 100
+   rows, keys and records, 2 to 8 sessions, every workload, both backends)
+   showed no data race, no error and no lost update in several thousand
+   checked increments of each kind. Tests:
+   `TestTransactionsWritingOneItemSerializeWhateverTheyWrote`,
+   `TestTransactionsWritingDifferentItemsAllCommit`,
+   `TestATransactionAlteringATableConflictsWithOneWritingItsRows`,
+   `TestWhatTheMergeRefusesStillSerializes`.
 
 2. **Write throughput falls as sessions are added, and transactions
    starve.** Read-modify-write on uniform keys over a million rows (W3),
@@ -255,6 +269,31 @@ as committed in `15885bb`.
 | W7 | write 256-KiB kv values @10/tx | 400 values | 254 | 66.7 | 37.8 | 54.5 | 55.1 | 35.6 | 0 | 0 | - | 2797 |
 | W7 | read 256-KiB kv values (scan) | 400 items | 3,762 | 986.3 | - | - | - | - | 0 | 0 | - | 2793 |
 | W8 | mixed 50/30/20 table/kv/doc, 64 sess | 537 tx | 1.6 | - | 1,745 | 197,568 | 219,658 | 872 | 4677 (4677) | 15 | - | 3023 |
+
+## Scaling in steps
+
+W3 on disk after the item rule, 10 s a phase, each run under the shared
+measurement lock. Transactions per second:
+
+| Rows | 1 session | 4 | 16 | 64 | Zipf: 1 | 4 | 16 | 64 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 22.8 | 12.1 | 4.6 | 2.0 | 28.5 | 12.8 | 4.6 | 2.3 |
+| 10,000 | 20.5 | 10.5 | 3.9 | 1.6 | 21.3 | 9.8 | 4.1 | 1.6 |
+| 100,000 | 16.2 | 10.7 | 4.5 | 2.2 | 27.1 | 12.1 | 4.8 | 2.3 |
+| 1,000,000 | 25.7 | 13.1 | 5.1 | 2.4 | 25.0 | 12.3 | 4.7 | 2.3 |
+
+Throughput stops scaling at the second session, whatever the table's
+size. The p99 at 4 sessions is 8.6 to 10.2 s, and 31 to 45 s at 64. Table
+size does not matter, from 1,000 rows to a million. The 1-session rate
+varies with what else the disk was doing, from 16 to 29 tx/s. On uniform
+keys almost every serialization failure is still a lost swap: 515 of 515
+at 64 sessions over a million rows. On Zipf keys the item rule adds real
+conflicts, 18 to 32% of failures at 4 to 64 sessions (117 of 619 at 64
+sessions over a million rows), all of which retried and committed. No
+transaction gave up, and no increment was lost at any step. At a million
+rows, 96% of blocked time is on the packstore's commit lock and the item
+check itself costs 4.2% of CPU. The ceiling is the single root swap
+(item 2 above and changes 1, 3 and 4 below), not the data or the rule.
 
 ## Where the time goes
 
