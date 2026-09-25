@@ -34,7 +34,7 @@ with their own progress; they import `engine/` alone.
 Tracked as GitHub issues on SmithOperatingSolutions/snapshot-engine, not here:
 
 - #7 move to snapshot-core v0.2.0: `stream.ReadAll`'s limit, model value limits, counters that sum and leave the item rule
-- #8 group commit: the batch leader is the ceiling above 16 sessions (in progress on `batch-diff`)
+- #8 group commit: the batch leader is the ceiling above 16 sessions (for the new team; a partial start is on branch `batch-diff`, described on the issue)
 - #9 read your writes without flushing (performance item 5)
 - #10 fetch an index lookup's rows in key order (performance item 9)
 - #11 decisions made during the performance and bounds work, for review
