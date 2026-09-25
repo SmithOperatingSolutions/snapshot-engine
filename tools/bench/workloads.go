@@ -448,6 +448,28 @@ func (s *suite) docFields() (int64, error) {
 	return sum, err
 }
 
+// counterSum is the sum of every kv counter: the authority for INCR.
+func (s *suite) counterSum() (int64, error) {
+	var sum int64
+	err := s.readOnly(func(tx *engine.Txn) error {
+		m, err := tx.KV(ctx, "kv")
+		if err != nil {
+			return err
+		}
+		return m.Scan(ctx, counterKey(0), func(k []byte, v engine.Value) (bool, error) {
+			if len(k) == 0 || k[0] != 'c' {
+				return false, nil
+			}
+			if v.Kind != engine.ValueCounter {
+				return false, fmt.Errorf("counter %s holds kind %d", k, v.Kind)
+			}
+			sum += v.Counter
+			return true, nil
+		})
+	})
+	return sum, err
+}
+
 // readOnly runs f in a transaction on main that is rolled back.
 func (s *suite) readOnly(f func(tx *engine.Txn) error) error {
 	sess, err := s.session("main")
@@ -476,6 +498,10 @@ func (s *suite) w4() error {
 	if err := s.loadKV(false); err != nil {
 		return err
 	}
+	sum, err := s.counterSum()
+	if err != nil {
+		return err
+	}
 	for _, batch := range []int{1, 100} {
 		for _, conc := range s.sc.kvConcs {
 			t, dur, err := s.parallel(conc, s.sc.phaseDur, func(sess *engine.Session, rng *rand.Rand, t *tally, deadline time.Time) error {
@@ -487,8 +513,13 @@ func (s *suite) w4() error {
 			if err != nil {
 				return err
 			}
+			after, err := s.counterSum()
+			if err != nil {
+				return err
+			}
 			r := t.result("W4", fmt.Sprintf("kv 70/20/10 GET/SET/INCR, %d/tx, %d sess", batch, conc), "ops", dur)
-			r.note = "lat = per tx"
+			r.note = "lat = per tx; counters " + lostUpdates(sum, after, t.ctrIncs)
+			sum = after
 			s.record(r)
 		}
 	}
@@ -500,10 +531,14 @@ func (s *suite) w4() error {
 func (s *suite) kvOps(sess *engine.Session, rng *rand.Rand, t *tally, batch int) {
 	kinds := make([]int, batch)
 	readOnly := true
+	var incrs int64
 	for i := range kinds {
 		kinds[i] = rng.IntN(100)
 		if kinds[i] >= 70 {
 			readOnly = false
+		}
+		if kinds[i] >= 90 {
+			incrs++
 		}
 	}
 	ok := s.txn(sess, t, rng, readOnly, func(tx *engine.Txn) error {
@@ -546,6 +581,7 @@ func (s *suite) kvOps(sess *engine.Session, rng *rand.Rand, t *tally, batch int)
 	})
 	if ok {
 		t.ops += uint64(batch)
+		t.ctrIncs += incrs
 	}
 }
 
@@ -956,6 +992,10 @@ func (s *suite) w8() error {
 	if err != nil {
 		return err
 	}
+	ctrBefore, err := s.counterSum()
+	if err != nil {
+		return err
+	}
 	var done, retried, failed atomic.Uint64
 	var commits, commitErrs atomic.Uint64
 	var commitLat hist
@@ -1053,9 +1093,14 @@ func (s *suite) w8() error {
 	if err != nil {
 		return err
 	}
+	ctrAfter, err := s.counterSum()
+	if err != nil {
+		return err
+	}
 	r := t.result("W8", fmt.Sprintf("mixed 50/30/20 table/kv/doc, %d sess", s.sc.mixConc), "tx", dur)
 	r.note = fmt.Sprintf("session commits %d (err %d), commit p50 %s ms p99 %s ms; table %s; documents %s", commits.Load(), commitErrs.Load(),
 		ms(commitLat.quantile(.5)), ms(commitLat.quantile(.99)), lostUpdates(balBefore, balAfter, t.incs), lostUpdates(docBefore, docAfter, t.docIncs))
+	r.note += "; counters " + lostUpdates(ctrBefore, ctrAfter, t.ctrIncs)
 	s.record(r)
 	return nil
 }

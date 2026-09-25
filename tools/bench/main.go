@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -56,6 +57,20 @@ type scale struct {
 }
 
 var scales = map[string]scale{
+	// tiny is for correctness under the race detector: few rows and keys,
+	// so sessions collide, and phases long enough for thousands of
+	// transactions.
+	"tiny": {
+		rows: 1000, rows1k: 200, tableBatch: 500, table1k: 100,
+		kvKeys: 1000, kvBatch: 500, counters: 20,
+		docs: 200, docBatch: 100,
+		readDur: 2 * time.Second, lookups: 20,
+		phaseDur: 20 * time.Second, concs: []int{2, 4, 8}, kvConcs: []int{2, 8}, docConc: 8,
+		vcsSmall: 10, vcsLarge: 100, commitSamples: 5,
+		wideRows: 20, wideSize: 64 << 10, bigDocs: 3, bigDocSize: 1 << 20, bigVals: 10, bigValSize: 256 << 10,
+		mixDur: time.Minute, mixTick: 10 * time.Second, mixCommit: 2 * time.Second, mixConc: 8,
+		maxRetries: 50,
+	},
 	"smoke": {
 		rows: 2000, rows1k: 500, tableBatch: 500, table1k: 100,
 		kvKeys: 2000, kvBatch: 500, counters: 50,
@@ -97,11 +112,15 @@ func run(args []string, out io.Writer) int {
 	fl.SetOutput(out)
 	c := config{out: out}
 	var backend, only, concs, dur string
-	fl.StringVar(&c.scale, "scale", "smoke", "smoke or full")
+	var rows, keys, docs int
+	fl.StringVar(&c.scale, "scale", "smoke", "tiny, smoke or full")
+	fl.IntVar(&rows, "rows", 0, "table rows, overriding the scale's")
+	fl.IntVar(&keys, "keys", 0, "kv keys, overriding the scale's")
+	fl.IntVar(&docs, "docs", 0, "documents, overriding the scale's")
 	fl.StringVar(&backend, "backend", "disk", "disk, mem or both")
 	fl.StringVar(&c.dir, "dir", "", "where the disk backend lives (default: a temp dir, removed afterwards)")
 	fl.StringVar(&only, "only", "", "comma-separated workloads to report (W1..W8; default all)")
-	fl.StringVar(&concs, "conc", "", "comma-separated W3 concurrency levels (default: the scale's)")
+	fl.StringVar(&concs, "conc", "", "comma-separated session counts: W3 and W4 run each, W5 and W8 the largest (default: the scale's)")
 	fl.StringVar(&dur, "duration", "", "each timed phase's length, overriding the scale's")
 	fl.StringVar(&c.cpuprof, "cpuprofile", "", "path prefix for a CPU profile per workload")
 	fl.StringVar(&c.memprof, "memprofile", "", "path prefix for an allocation profile per workload")
@@ -126,7 +145,26 @@ func run(args []string, out io.Writer) int {
 			}
 			sc.concs = append(sc.concs, n)
 		}
+		sc.kvConcs = sc.concs
+		sc.docConc = slices.Max(sc.concs)
+		sc.mixConc = sc.docConc
 	}
+	for _, o := range []struct {
+		n   int
+		dst *int
+	}{{rows, &sc.rows}, {keys, &sc.kvKeys}, {docs, &sc.docs}} {
+		if o.n < 0 || (o.n > 0 && o.n < 100) {
+			fmt.Fprintf(out, "bench: -rows, -keys and -docs take at least 100 (the hot-record phase needs 100 documents)\n")
+			return 2
+		}
+		if o.n > 0 {
+			*o.dst = o.n
+		}
+	}
+	sc.rows1k = min(sc.rows1k, sc.rows)
+	sc.counters = min(sc.counters, sc.kvKeys)
+	sc.vcsLarge = min(sc.vcsLarge, sc.rows/4)
+	sc.vcsSmall = min(sc.vcsSmall, sc.vcsLarge)
 	if dur != "" {
 		d, err := time.ParseDuration(dur)
 		if err != nil {

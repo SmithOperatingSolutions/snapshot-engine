@@ -118,7 +118,7 @@ type tally struct {
 	firstErr                             string
 	lat, commit                          hist
 	live                                 *atomic.Uint64 // when set, counts retries as they happen (W8's tick line)
-	incs, docIncs                        int64          // increments committed: table balances, document fields
+	incs, docIncs, ctrIncs               int64          // increments committed: table balances, document fields, kv counters
 }
 
 func (t *tally) fail(err error) {
@@ -137,6 +137,7 @@ func (t *tally) merge(o *tally) {
 	t.bytes += o.bytes
 	t.incs += o.incs
 	t.docIncs += o.docIncs
+	t.ctrIncs += o.ctrIncs
 	if t.firstErr == "" {
 		t.firstErr = o.firstErr
 	}
