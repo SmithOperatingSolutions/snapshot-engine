@@ -124,3 +124,171 @@ func FuzzSequence(f *testing.F) {
 		}
 	})
 }
+
+// nest wraps leaf in depth objects, each holding the next under "next"
+// beside pad.
+func nest(depth int, leaf, pad merge.Node) merge.Node {
+	n := leaf
+	for range depth {
+		n = merge.Obj(merge.Field{Name: "next", Value: n}, merge.Field{Name: "pad", Value: pad})
+	}
+	return n
+}
+
+// A tree merge compares each node once: it compared whole subtrees, by
+// building their canonical text, at every level it descended, so a
+// document's cost grew with its depth times its size (snapshot-engine#6).
+// Here 16 levels over a 96 KB string, the two sides changing two leaves
+// at the bottom, must merge to both changes under 256 KiB: less than the
+// text of the string, so no comparison builds it.
+func TestRegression_SE6_ATreeMergeComparesEachNodeOnce(t *testing.T) {
+	leaf := func(x, y string) merge.Node {
+		return merge.Obj(merge.Field{Name: "big", Value: merge.Str(strings.Repeat("b", 96<<10))}, merge.Field{Name: "x", Value: merge.Num(x)}, merge.Field{Name: "y", Value: merge.Num(y)})
+	}
+	pad := merge.Str(strings.Repeat("p", 256))
+	base, ours, theirs, want := nest(16, leaf("1", "1"), pad), nest(16, leaf("2", "1"), pad), nest(16, leaf("1", "2"), pad), nest(16, leaf("2", "2"), pad)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	got := merge.Tree(base, ours, theirs, merge.TreeOptions{})
+	runtime.ReadMemStats(&after)
+	if !got.Clean() || !got.Value.Equal(want) {
+		t.Fatalf("two leaves changed 16 levels down merged with conflicts %v, or not to both changes", got.Conflicts)
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 256<<10 {
+		t.Errorf("merging a 100 KB value 16 levels deep allocated %d bytes: every level compares its whole subtree again, building its text", grew)
+	}
+}
+
+// Tree merges values nested no deeper than MaxDepth arrays and objects, the
+// document model's limit; values a caller built deeper are a conflict at
+// the root, the base kept, before any recursion into them
+// (snapshot-engine#6).
+func TestRegression_SE6_ATreeMergeRefusesNestingPastMaxDepth(t *testing.T) {
+	pad := merge.Num("0")
+	for _, depth := range []int{merge.MaxDepth, merge.MaxDepth + 1, 10 * merge.MaxDepth} {
+		leaf := func(x, y string) merge.Node {
+			return merge.Obj(merge.Field{Name: "x", Value: merge.Num(x)}, merge.Field{Name: "y", Value: merge.Num(y)})
+		}
+		levels := depth - 1 // the leaf object is a level too
+		base, ours, theirs := nest(levels, leaf("1", "1"), pad), nest(levels, leaf("2", "1"), pad), nest(levels, leaf("1", "2"), pad)
+		got := merge.Tree(base, ours, theirs, merge.TreeOptions{})
+		if depth <= merge.MaxDepth { // the positive control, at the limit
+			if !got.Clean() || !got.Value.Equal(nest(levels, leaf("2", "2"), pad)) {
+				t.Errorf("a value nested %d deep, the limit, merged with conflicts %v, or not to both changes", depth, got.Conflicts)
+			}
+			continue
+		}
+		if len(got.Conflicts) != 1 || len(got.Conflicts[0].Path) != 0 || !got.Value.Equal(base) {
+			t.Errorf("a value nested %d deep, past the limit of %d, merged with conflicts %v: want one at the root, the base kept", depth, merge.MaxDepth, got.Conflicts)
+		}
+	}
+}
+
+// Writing out a node's canonical text takes no stack in proportion to its
+// depth: it recursed once per level, so a caller's node nested deeply
+// enough could exhaust the goroutine's stack, which no recover catches
+// (snapshot-engine#6). A node nested 20,000 deep must be written out with
+// the stack growing under 1 MiB.
+func TestRegression_SE6_CanonicalTakesNoStackInProportionToDepth(t *testing.T) {
+	const depth = 20000
+	n := merge.Num("1")
+	for range depth {
+		n = merge.Arr(n)
+	}
+	want := strings.Repeat("[", depth) + "1" + strings.Repeat("]", depth)
+	done := make(chan struct{})
+	var grew uint64
+	var got string
+	go func() {
+		defer close(done)
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		got = n.Canonical()
+		runtime.ReadMemStats(&after)
+		grew = after.StackInuse - min(after.StackInuse, before.StackInuse)
+	}()
+	<-done
+	if got != want {
+		t.Fatalf("a node nested %d deep wrote out as %d bytes, want %d", depth, len(got), len(want))
+	}
+	if grew > 1<<20 {
+		t.Errorf("writing out a node nested %d deep grew the stack by %d bytes: a deep enough node a caller builds crashes the process", depth, grew)
+	}
+}
+
+// node builds a small value from fuzz bytes: at most four levels, four
+// elements or fields a level, fields named a to d.
+func node(b []byte, depth int) (merge.Node, []byte) {
+	if len(b) == 0 {
+		return merge.Num("0"), b
+	}
+	c, b := b[0], b[1:]
+	switch c % 6 {
+	case 0:
+		return merge.Node{Kind: merge.Null}, b
+	case 1:
+		return merge.Boolean(c&0x80 != 0), b
+	case 2:
+		return merge.Num(strconv.Itoa(int(c >> 4))), b
+	case 3:
+		return merge.Str(string(rune('x' + c>>6))), b
+	}
+	if depth == 0 || len(b) == 0 {
+		return merge.Num("0"), b
+	}
+	count := int(b[0] % 5)
+	b = b[1:]
+	if c%6 == 4 {
+		var es []merge.Node
+		for range count {
+			var e merge.Node
+			e, b = node(b, depth-1)
+			es = append(es, e)
+		}
+		return merge.Arr(es...), b
+	}
+	var fs []merge.Field
+	seen := map[string]bool{}
+	for i := range count {
+		var v merge.Node
+		v, b = node(b, depth-1)
+		if name := string(rune('a' + (int(c)+i)%4)); !seen[name] {
+			seen[name] = true
+			fs = append(fs, merge.Field{Name: name, Value: v})
+		}
+	}
+	return merge.Obj(fs...), b
+}
+
+// FuzzTree merges three small values built from fuzz bytes: Tree is
+// deterministic, symmetric in value, conflicts and flags, yields to a side
+// when the other made no change, and lands one change once.
+func FuzzTree(f *testing.F) {
+	f.Add([]byte{5, 3, 2, 3, 4, 2, 2, 2}, []byte{5, 3, 18, 3, 4, 2, 2, 34}, []byte{5, 3, 2, 3, 4, 3, 2, 2, 2})
+	f.Add([]byte{4, 3, 2, 18, 34}, []byte{4, 2, 2, 50}, []byte{4, 4, 2, 18, 34, 66})
+	f.Add([]byte{2}, []byte{18}, []byte{34})
+	f.Fuzz(func(t *testing.T, bb, ob, tb []byte) {
+		base, _ := node(bb, 4)
+		ours, _ := node(ob, 4)
+		theirs, _ := node(tb, 4)
+		counter := merge.TreeOptions{Counter: func(p merge.Path) bool { return len(p) > 0 && p[len(p)-1] == "c" }}
+		same := func(x, y merge.Result[merge.Node]) bool {
+			return x.Value.Equal(y.Value) && len(x.Conflicts) == len(y.Conflicts) && len(x.Flagged) == len(y.Flagged)
+		}
+		for _, o := range []merge.TreeOptions{{}, counter} {
+			got := merge.Tree(base, ours, theirs, o)
+			if !same(got, merge.Tree(base, ours, theirs, o)) {
+				t.Fatalf("Tree(%s, %s, %s) is not deterministic", base.Canonical(), ours.Canonical(), theirs.Canonical())
+			}
+			if !same(got, merge.Tree(base, theirs, ours, o)) {
+				t.Fatalf("Tree(%s, %s, %s) is not symmetric", base.Canonical(), ours.Canonical(), theirs.Canonical())
+			}
+			if r := merge.Tree(base, ours, base, o); !r.Clean() || !r.Value.Equal(ours) {
+				t.Fatalf("Tree(%s, %s, base) = %s %v, want ours", base.Canonical(), ours.Canonical(), r.Value.Canonical(), r.Conflicts)
+			}
+			if r := merge.Tree(base, ours, ours, o); !r.Clean() || !r.Value.Equal(ours) {
+				t.Fatalf("Tree(%s, %s, the same) = %s %v, want it once", base.Canonical(), ours.Canonical(), r.Value.Canonical(), r.Conflicts)
+			}
+		}
+	})
+}

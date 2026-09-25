@@ -225,3 +225,6 @@ func sortedKeys(m map[string]bool) []string {
 	sort.Strings(out)
 	return out
 }
+
+// MaxDepth is the deepest nesting of arrays and objects Tree merges.
+const MaxDepth = 64
