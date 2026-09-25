@@ -356,7 +356,13 @@ func (t *Txn) onto(ctx context.Context, ours, cur *object.Namespace) (*object.Na
 	if err := t.writeWrite(ctx, ours, cur); err != nil {
 		return nil, err
 	}
-	res, err := merge.Merge(ctx, t.s.db.models.registry, t.base, ours, cur, t.s.db.r.Chunks(), merge.Options{})
+	// cur is the merge's first side, so the models rewrite it with what
+	// this transaction wrote, a few items, rather than rewrite ours with
+	// everything that landed since its snapshot: a batch's later members
+	// would otherwise each rewrite all the earlier ones. The item rule has
+	// refused every item both wrote, so which side is first changes
+	// nothing in the result.
+	res, err := merge.Merge(ctx, t.s.db.models.registry, t.base, cur, ours, t.s.db.r.Chunks(), merge.Options{})
 	if errors.Is(err, merge.ErrTooManyConflicts) {
 		return nil, fmt.Errorf("%w (%w)", ErrSerialization, err)
 	}
