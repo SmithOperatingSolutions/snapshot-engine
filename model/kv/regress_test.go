@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk"
@@ -11,6 +13,7 @@ import (
 	"github.com/SmithOperatingSolutions/snapshot-core/core/hash"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/model"
 
+	"github.com/SmithOperatingSolutions/snapshot-engine/merge"
 	"github.com/SmithOperatingSolutions/snapshot-engine/model/kv"
 )
 
@@ -89,5 +92,39 @@ func TestRegression_SE5_AFrameSizesNothingFromItsClaimedCount(t *testing.T) {
 		if grew := after.TotalAlloc - before.TotalAlloc; grew > 64<<10 {
 			t.Errorf("decoding a %d-byte kind %d frame claiming %d members allocated %d bytes: a corrupt frame's claim costs memory", len(frame), k, kv.MaxMembers, grew)
 		}
+	}
+}
+
+// A sequence one side changed by more than merge.MaxSequenceEdits while
+// the other changed it too is a conflict at the key, whose reason says the
+// list was changed too much to align rather than naming a position; at the
+// budget it merges (snapshot-engine#4, DESIGN D18).
+func TestRegression_SE4_AKVSequencePastTheEditBudgetConflictsAtTheKey(t *testing.T) {
+	elems := make([]string, 600)
+	for i := range elems {
+		elems[i] = "e" + strconv.Itoa(i)
+	}
+	replaced := func(n int) []string {
+		out := append([]string(nil), elems...)
+		for i := range n {
+			out[i] = "r" + strconv.Itoa(i)
+		}
+		return out
+	}
+	base := map[string]kv.Value{"queue": seq(elems...)}
+	theirs := map[string]*kv.Value{"queue": ptr(seq(append(append([]string(nil), elems...), "z")...))}
+
+	// Positive control: one side at the budget, the other appending.
+	atLimit := replaced(merge.MaxSequenceEdits / 2)
+	res, got := merged(t, base, map[string]*kv.Value{"queue": ptr(seq(atLimit...))}, theirs)
+	clean(t, res, "a sequence changed by exactly the edit budget on one side and appended to on the other")
+	if want := seq(append(atLimit, "z")...); !sameValue(t, got["queue"], want) {
+		t.Fatalf("the queue merged to %d elements, want %d: both sides' changes", len(got["queue"].Seq), len(want.Seq))
+	}
+
+	res, _ = merged(t, base, map[string]*kv.Value{"queue": ptr(seq(replaced(merge.MaxSequenceEdits/2 + 1)...))}, theirs)
+	oneConflict(t, res, "queue", "", "sequence")
+	if r := res.Conflicts[0].Reason; !strings.HasPrefix(r, "sequence: ") || !strings.Contains(r, strconv.Itoa(merge.MaxSequenceEdits)) {
+		t.Errorf("the conflict says %q: want \"sequence: \" and why, naming the budget of %d edits, not a position", r, merge.MaxSequenceEdits)
 	}
 }
