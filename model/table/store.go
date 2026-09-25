@@ -70,11 +70,11 @@ func empty(ctx context.Context, s chunk.ReadWriter, cfg prolly.Config, schema Sc
 		return nil, err
 	}
 	t := &Table{schema: schema, catalog: catalog, cfg: cfg, store: s, indexes: map[Tag]*prolly.Map{}}
-	if t.primary, err = prolly.Empty(ctx, s, cfg); err != nil {
+	if t.primary, err = prolly.Empty(ctx, s, rowConfig(cfg, schema)); err != nil {
 		return nil, err
 	}
 	for _, ix := range schema.Indexes {
-		if t.indexes[ix.Tag], err = prolly.Empty(ctx, s, cfg); err != nil {
+		if t.indexes[ix.Tag], err = prolly.Empty(ctx, s, indexConfig(cfg)); err != nil {
 			return nil, err
 		}
 	}
@@ -120,15 +120,38 @@ func Open(ctx context.Context, s chunk.ReadWriter, cfg prolly.Config, root model
 		return nil, fmt.Errorf("%w: a table of %d rows whose root says %d", chunk.ErrCorrupt, r.primary.count, root.Size)
 	}
 	t := &Table{schema: schema, catalog: r.catalog, cfg: cfg, store: s, indexes: map[Tag]*prolly.Map{}, root: root}
-	if t.primary, err = openMap(ctx, s, cfg, r.primary); err != nil {
+	if t.primary, err = openMap(ctx, s, rowConfig(cfg, schema), r.primary); err != nil {
 		return nil, err
 	}
 	for i, ix := range schema.Indexes { // decodeRoot holds the record's indexes to the catalog's, in order, each as full as the primary map
-		if t.indexes[ix.Tag], err = openMap(ctx, s, cfg, r.indexes[i]); err != nil {
+		if t.indexes[ix.Tag], err = openMap(ctx, s, indexConfig(cfg), r.indexes[i]); err != nil {
 			return nil, err
 		}
 	}
 	return t, nil
+}
+
+// rowConfig is cfg for schema's primary map: no row record is longer
+// than its non-key cells at their longest (maxCell), so no longer value is
+// read, a stream's claimed length being able to pass what it stores many
+// times over (snapshot-core#23). A row of no non-key cells is empty, and
+// its limit is one byte, 0 being the core's default.
+func rowConfig(cfg prolly.Config, schema Schema) prolly.Config {
+	n := 0
+	for _, c := range schema.Columns {
+		if !schema.isKey(c.Tag) {
+			n += maxCell(c)
+		}
+	}
+	cfg.MaxValue = max(n, 1)
+	return cfg
+}
+
+// indexConfig is cfg for an index map, whose values are empty: its limit is
+// one byte, 0 being the core's default.
+func indexConfig(cfg prolly.Config) prolly.Config {
+	cfg.MaxValue = 1
+	return cfg
 }
 
 func openMap(ctx context.Context, s chunk.ReadWriter, cfg prolly.Config, ir indexRoot) (*prolly.Map, error) {
@@ -207,8 +230,11 @@ func (t *Table) decodeKey(b []byte) (Key, error) {
 }
 
 // isKeyColumn says whether tag is a primary key column.
-func (t *Table) isKeyColumn(tag Tag) bool {
-	for _, k := range t.schema.PrimaryKey {
+func (t *Table) isKeyColumn(tag Tag) bool { return t.schema.isKey(tag) }
+
+// isKey says whether tag is a primary key column.
+func (s Schema) isKey(tag Tag) bool {
+	for _, k := range s.PrimaryKey {
 		if k == tag {
 			return true
 		}
