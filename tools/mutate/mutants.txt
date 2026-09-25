@@ -909,6 +909,27 @@ replace: \t\thit = true
 pkg: ./engine
 run: ^TestTransactionsWritingDifferentItemsAllCommit$
 
+id: engine-txn-a-schema-change-is-every-row
+file: engine/txn.go
+find: \tif errors.Is(err, table.ErrSchema) {\n\t\treturn true, nil
+replace: \tif false {\n\t\treturn true, nil
+pkg: ./engine
+run: ^TestATransactionAlteringATableConflictsWithOneWritingItsRows$
+
+id: engine-txn-our-schema-change-conflicts
+file: engine/txn.go
+find: \t\thit := whole\n
+replace: \t\thit := whole && false\n
+pkg: ./engine
+run: ^TestATransactionAlteringATableConflictsWithOneWritingItsRows$
+
+id: engine-txn-their-schema-change-conflicts
+file: engine/txn.go
+find: \treturn hit || whole, err
+replace: \treturn hit || whole && false, err
+pkg: ./engine
+run: ^TestATransactionAlteringATableConflictsWithOneWritingItsRows$
+
 id: engine-txn-a-branch-mid-merge-takes-no-transaction
 file: engine/txn.go
 find: \tif ws.Merge != nil {\n\t\treturn nil, ErrMergeInProgress\n\t}

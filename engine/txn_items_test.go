@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/SmithOperatingSolutions/snapshot-engine/engine"
+	"github.com/SmithOperatingSolutions/snapshot-engine/model/table"
 )
 
 // Transactions conflict per item (the user's decision, 2026-09-25): two
@@ -236,4 +237,63 @@ func counterIs(t *testing.T, s *engine.Session, want int64) string {
 		return "hits is " + strconv.FormatInt(v.Counter, 10) + ", want " + strconv.FormatInt(want, 10)
 	}
 	return ""
+}
+
+// E4: a transaction that changes a table's schema writes every row of it,
+// so it cannot commit beside one that wrote a row of the table since its
+// snapshot, whichever commits first; the one that commits second fails
+// with ErrSerialization and leaves the working set as the first left it.
+// A transaction on another table commits beside either (the positive
+// control).
+func TestATransactionAlteringATableConflictsWithOneWritingItsRows(t *testing.T) {
+	alter := func(t *testing.T, tx *engine.Txn) {
+		next := txnPeople()
+		next.Columns = append(next.Columns, engine.Column{Tag: 4, Name: "email", Type: table.TypeText, Nullable: true})
+		if err := txnTable(t, tx, "people").Alter(ctx, next); err != nil {
+			t.Fatalf("Alter: %v", err)
+		}
+	}
+	write := func(t *testing.T, tx *engine.Txn) {
+		if err := txnTable(t, tx, "people").Update(ctx, engine.Key{int64(2)}, txnPerson(2, "ben", 40)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		name          string
+		first, second itemWrite
+	}{
+		{"the alteration first", alter, write},
+		{"the row first", write, alter},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, s, _ := txnDB(t)
+			setup := txnBegin(t, s)
+			if _, err := setup.CreateTable(ctx, "notes", txnPeople()); err != nil {
+				t.Fatal(err)
+			}
+			if err := setup.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			x, y := txnBegin(t, s), txnBegin(t, txnSession(t, db, "main"))
+			other := txnBegin(t, txnSession(t, db, "main"))
+			tc.first(t, x)
+			tc.second(t, y)
+			if _, err := txnTable(t, other, "notes").Insert(ctx, txnPerson(9, "note", 1)); err != nil {
+				t.Fatal(err)
+			}
+			if err := x.Commit(ctx); err != nil {
+				t.Fatalf("the first commit: %v", err)
+			}
+			after := txnWS(t, s)
+			if err := y.Commit(ctx); !errors.Is(err, engine.ErrSerialization) {
+				t.Errorf("the second commit, on the table the first %s = %v, want ErrSerialization", map[bool]string{true: "altered", false: "wrote a row of"}[tc.name == "the alteration first"], err)
+			}
+			if got := txnWS(t, s); got != after {
+				t.Errorf("the refused commit changed the working set (%s, want %s)", got.Short(), after.Short())
+			}
+			if err := other.Commit(ctx); err != nil {
+				t.Errorf("a transaction on another table = %v, want it to commit", err)
+			}
+		})
+	}
 }
