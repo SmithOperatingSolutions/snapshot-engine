@@ -2220,3 +2220,26 @@ find: \tif b.inner == nil {\n\t\treturn auth.ErrDenied
 replace: \tif b.inner == nil {\n\t\treturn nil
 pkg: ./engine
 run: ^TestABatchIsAllowedOnlyWhatItsMembersWere$
+
+# model value limits (#7)
+
+id: kv-map-reads-no-value-past-a-frame
+file: model/kv/kv.go
+find: c.MaxValue = maxFrame
+replace: c.MaxValue = maxFrame + 1
+pkg: ./model/kv
+run: ^TestRegression_SE7_AKVObjectReadsNoValueLongerThanAFrame$
+
+id: kv-map-limit-applies-to-the-spec
+file: model/kv/kv.go
+find: Format: Format, Config: config(c), Check
+replace: Format: Format, Config: c, Check
+pkg: ./model/kv
+run: ^TestRegression_SE7_AKVObjectReadsNoValueLongerThanAFrame$
+
+id: kv-map-holds-the-longest-frame
+file: model/kv/kv.go
+find: c.MaxValue = maxFrame
+replace: c.MaxValue = maxFrame - 1
+pkg: ./model/kv
+run: ^TestRegression_SE7_AKVObjectReadsNoValueLongerThanAFrame$

@@ -19,7 +19,7 @@ type Map struct {
 
 // Empty is a new, empty map.
 func Empty(ctx context.Context, s chunk.ReadWriter, c prolly.Config) (*Map, error) {
-	m, err := prolly.Empty(ctx, s, c)
+	m, err := prolly.Empty(ctx, s, config(c))
 	if err != nil {
 		return nil, err
 	}
