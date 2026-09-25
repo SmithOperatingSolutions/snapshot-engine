@@ -92,6 +92,31 @@ issues, not here.
   …@vX.Y.Z`, `go mod tidy`, `go build`. Check the compiler's exit code, not a
   pipe's.
 
+## The development machine
+
+The engine was built on one machine, and the next developer works on the
+same one. It is an i7-1360P with 4 performance and 8 efficient cores, 62 GB of
+RAM, and an NVMe disk.
+
+- **Checkouts.** `/home/adamsmith/git/snapshot-engine` (main) and
+  `/home/adamsmith/git/snapshot-core`. A `go.work` over the two is made by
+  hand when needed, and never committed.
+- **Worktrees as of 2026-09-25:**
+  - `../snapshot-engine-bd` holds branch `batch-diff`, a partial start on #8.
+    It has seven commits plus an uncommitted engine change, none verified; #8
+    describes it.
+  - `../snapshot-engine-v020` holds branch `core-v0.2.0`, the move to core
+    v0.2.0 (#7).
+  
+  Every other branch is already in main, and branches are kept after merging.
+- **Memory caps.** `systemd-run --user --scope` works here and is how heavy
+  runs are capped.
+- **Measurement lock.** Timed runs have shared a lock file under the Claude
+  scratchpad (`/tmp/claude-1000/.../scratchpad/measure.lock`). Any path works,
+  as long as everyone measuring uses the same one.
+- **Other services share the machine.** Docker, a Postgres, logflare and
+  MinIO all run here, so check the load before timing anything.
+
 ## Tooling quirks seen on the development machine
 
 - The machine's `gh` (2.45.0) cannot run `gh pr edit` or `gh issue view`,
