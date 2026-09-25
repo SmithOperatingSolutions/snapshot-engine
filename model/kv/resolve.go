@@ -241,6 +241,10 @@ func mergeSequence(key []byte, base, o, th Value) (Value, []model.Conflict) {
 	if !r.Clean() {
 		reasons := make([]string, 0, len(r.Conflicts))
 		for _, c := range r.Conflicts {
+			if len(c.Path) == 0 { // the list as a whole (DESIGN D18)
+				reasons = append(reasons, "sequence: "+c.Reason)
+				continue
+			}
 			reasons = append(reasons, fmt.Sprintf("sequence at %s: %s", c.Path, c.Reason))
 		}
 		return Value{}, []model.Conflict{{Location: Location(key, nil), Reason: strings.Join(reasons, "; ")}}

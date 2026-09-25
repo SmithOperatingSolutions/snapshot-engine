@@ -1988,3 +1988,17 @@ find: case equalKeys(kt, kb), equalKeys(ko, kt):\n\t\treturn Result[[]T]{Value: 
 replace: case equalKeys(ko, kt):\n\t\treturn Result[[]T]{Value: append([]T(nil), ours...)}
 pkg: ./merge
 run: ^TestRegression_SE4_ASequenceMergePastTheEditBudgetIsAConflict$
+
+id: kv-a-sequence-conflict-at-the-list-names-no-position
+file: model/kv/resolve.go
+find: if len(c.Path) == 0 { // the list as a whole
+replace: if false { // the list as a whole
+pkg: ./model/kv
+run: ^TestRegression_SE4_AKVSequencePastTheEditBudgetConflictsAtTheKey$
+
+id: merge-sequence-edit-budget-reaches-kv
+file: merge/sequence.go
+find: const MaxSequenceEdits = 1000
+replace: const MaxSequenceEdits = 100000
+pkg: ./model/kv
+run: ^TestRegression_SE4_AKVSequencePastTheEditBudgetConflictsAtTheKey$
