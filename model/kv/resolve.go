@@ -188,17 +188,18 @@ func mergeSortedSet(key []byte, base, o, th Value) (Value, []model.Conflict) {
 		}
 		return keys[i].Tag < keys[j].Tag
 	})
+	sb, sides := scoresOf(base), [2]map[merge.Tagged[string]]float64{scoresOf(o), scoresOf(th)}
 	for _, m := range keys {
-		so, st := scoreOf(o, m), scoreOf(th, m)
-		r := merge.Scalar(scoreOf(base, m), so, st)
+		so, st := scoreIn(sides[0], m), scoreIn(sides[1], m)
+		r := merge.Scalar(scoreIn(sb, m), so, st)
 		if !r.Clean() {
 			conflicts = append(conflicts, model.Conflict{Location: Location(key, []byte(m.Elem)), Reason: "score " + scalarReason(so.present, st.present)})
 			continue
 		}
 		s := r.Value
 		if !s.present { // present in the set by tag but with no score on the side that has it: take whichever side holds it
-			for _, side := range []Value{o, th} {
-				if s = scoreOf(side, m); s.present {
+			for _, side := range sides {
+				if s = scoreIn(side, m); s.present {
 					break
 				}
 			}
@@ -223,13 +224,19 @@ func scoredMembers(ss []Scored) merge.Members[string] {
 	return out
 }
 
-func scoreOf(v Value, m merge.Tagged[string]) score {
+// scoresOf indexes a sorted set's scores by tagged member, so a merge looks
+// each member up once instead of scanning the set for it.
+func scoresOf(v Value) map[merge.Tagged[string]]float64 {
+	out := make(map[merge.Tagged[string]]float64, len(v.Scores))
 	for _, s := range v.Scores {
-		if uint64(m.Tag) == s.Tag && string(s.Member) == m.Elem {
-			return score{present: true, value: s.Score}
-		}
+		out[merge.Tagged[string]{Elem: string(s.Member), Tag: merge.Tag(s.Tag)}] = s.Score
 	}
-	return score{}
+	return out
+}
+
+func scoreIn(scores map[merge.Tagged[string]]float64, m merge.Tagged[string]) score {
+	v, ok := scores[m]
+	return score{present: ok, value: v}
 }
 
 // mergeSequence merges by element identity and position through the
