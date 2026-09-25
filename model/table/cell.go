@@ -341,6 +341,24 @@ func parseDecimal(s string) (neg bool, digits []byte, exp int, err error) {
 	return neg, digits, exp, nil
 }
 
+// canonicalLen is the length of canonical's text for a nonzero value of n
+// digits, without building it: the exponent comes from the cell, and the
+// text is as long as the exponent says (snapshot-engine#2).
+func canonicalLen(neg bool, n, exp int) int {
+	sign := 0
+	if neg {
+		sign = 1
+	}
+	switch {
+	case exp <= 0:
+		return sign + 2 - exp + n // "0." then -exp zeros, then the digits
+	case exp >= n:
+		return sign + exp // the digits, then exp-n zeros
+	default:
+		return sign + n + 1 // the digits with a point among them
+	}
+}
+
 // canonical writes the decimal text of 0.digits × 10^exp.
 func canonical(neg bool, digits []byte, exp int) Numeric {
 	if len(digits) == 0 {
@@ -471,6 +489,9 @@ func decodeNumeric(b []byte) (Numeric, []byte, error) {
 	}
 	if len(digits) == 0 || digits[0] == 0 || digits[len(digits)-1] == 0 {
 		return "", nil, fmt.Errorf("%w: a numeric that is not canonical", chunk.ErrCorrupt)
+	}
+	if n := canonicalLen(neg, len(digits), exp); n > MaxNumericLen {
+		return "", nil, fmt.Errorf("%w: a numeric of %d bytes of text, over %d", chunk.ErrCorrupt, n, MaxNumericLen)
 	}
 	return canonical(neg, digits, exp), b, nil
 }
