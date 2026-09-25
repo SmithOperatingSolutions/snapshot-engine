@@ -1026,7 +1026,7 @@ file: engine/txn.go
 find: \t\t\tif len(res.Conflicts) > 0 {\n\t\t\t\treturn ErrSerialization\n\t\t\t}
 replace: \t\t\tif false {\n\t\t\t\treturn ErrSerialization\n\t\t\t}
 pkg: ./engine
-run: ^TestTwoTransactionsOnTheSameCellSerialize$
+run: ^TestWhatTheMergeRefusesStillSerializes$
 
 id: engine-txn-a-lost-swap-is-tried-again
 file: engine/txn.go

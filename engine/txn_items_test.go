@@ -297,3 +297,53 @@ func TestATransactionAlteringATableConflictsWithOneWritingItsRows(t *testing.T) 
 		})
 	}
 }
+
+// E4: what the item rule leaves to the merge still serializes. Two
+// transactions creating an object under one name, or one dropping a table
+// the other writes a row of, change no object both modified, so the
+// namespace merge decides them: an object added two ways, or deleted on one
+// side and changed on the other, is a conflict, and the second commit fails
+// with ErrSerialization and leaves the working set as the first left it.
+func TestWhatTheMergeRefusesStillSerializes(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		first, second itemWrite
+	}{
+		{"one name created twice", createNotes(1), createNotes(2)},
+		{"a table dropped and written", func(t *testing.T, tx *engine.Txn) {
+			if err := tx.Drop(ctx, "people"); err != nil {
+				t.Fatalf("Drop: %v", err)
+			}
+		}, rowName("ann")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, s, _ := txnDB(t)
+			x, y := txnBegin(t, s), txnBegin(t, txnSession(t, db, "main"))
+			tc.first(t, x)
+			tc.second(t, y)
+			if err := x.Commit(ctx); err != nil {
+				t.Fatalf("the first commit: %v", err)
+			}
+			after := txnWS(t, s)
+			if err := y.Commit(ctx); !errors.Is(err, engine.ErrSerialization) {
+				t.Errorf("the second commit, which the merge cannot combine with the first = %v, want ErrSerialization", err)
+			}
+			if got := txnWS(t, s); got != after {
+				t.Errorf("the refused commit changed the working set (%s, want %s)", got.Short(), after.Short())
+			}
+		})
+	}
+}
+
+// createNotes makes a table notes holding one row of id.
+func createNotes(id int64) itemWrite {
+	return func(t *testing.T, tx *engine.Txn) {
+		notes, err := tx.CreateTable(ctx, "notes", txnPeople())
+		if err != nil {
+			t.Fatalf("CreateTable: %v", err)
+		}
+		if _, err := notes.Insert(ctx, txnPerson(id, "note", 1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
