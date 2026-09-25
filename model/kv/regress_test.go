@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk/memstore"
@@ -126,5 +127,37 @@ func TestRegression_SE4_AKVSequencePastTheEditBudgetConflictsAtTheKey(t *testing
 	oneConflict(t, res, "queue", "", "sequence")
 	if r := res.Conflicts[0].Reason; !strings.HasPrefix(r, "sequence: ") || !strings.Contains(r, strconv.Itoa(merge.MaxSequenceEdits)) {
 		t.Errorf("the conflict says %q: want \"sequence: \" and why, naming the budget of %d edits, not a position", r, merge.MaxSequenceEdits)
+	}
+}
+
+// A sorted-set merge costs time in proportion to the set: every member's
+// score was found by scanning the whole set, so a set at the frame limit,
+// 11,000 members, took a second per key merged (snapshot-engine#6). A
+// timing guard with headroom: the best of three merges must take under a
+// quarter of a second (ten times that under the race detector), where the
+// scan took four times as long.
+func TestRegression_SE6_ASortedSetMergeIsNotQuadratic(t *testing.T) {
+	const n = 11000
+	var ss []kv.Scored
+	for i := range n {
+		ss = append(ss, scored("m"+strconv.Itoa(i), float64(i), 1))
+	}
+	ours, theirs := append([]kv.Scored(nil), ss...), append([]kv.Scored(nil), ss...)
+	ours[0].Score, theirs[1].Score = -1, -2
+	s := memstore.New()
+	b := write(t, s, map[string]kv.Value{"z": zset(ss...)})
+	o := write(t, s, map[string]kv.Value{"z": zset(ours...)})
+	th := write(t, s, map[string]kv.Value{"z": zset(theirs...)})
+	best := time.Duration(1<<63 - 1)
+	for range 3 {
+		start := time.Now()
+		res, err := kv.Model{Config: cfg()}.Merge(ctx, b, o, th, s)
+		best = min(best, time.Since(start))
+		if err != nil || len(res.Conflicts) != 0 {
+			t.Fatalf("two score changes to different members merged with %v, conflicts %+v", err, res.Conflicts)
+		}
+	}
+	if ceiling := raceScale * 250 * time.Millisecond; best > ceiling {
+		t.Errorf("merging a sorted set of %d members changed on both sides took %v at best, over %v: a key's merge grows with the square of its set", n, best, ceiling)
 	}
 }
