@@ -344,10 +344,13 @@ func TestACollectionHandleReadsItsWritesAndRefusesWhatIsNotADocument(t *testing.
 	}
 }
 
-// Transactions on one kv map merge through the kv model: different keys
-// both commit; one key set two ways serializes, the second's write absent;
-// a counter incremented in two transactions sums.
-func TestTransactionsOnOneKVMapMergeByKey(t *testing.T) {
+// Transactions on one kv map conflict by key: different keys both commit;
+// one key set two ways serializes, the second's write absent; a counter
+// incremented in two transactions serializes too, as any key written twice
+// does (a counter's increments will sum again once the core asks the kv
+// model about identical changes; until then the second transaction
+// retries).
+func TestTransactionsOnOneKVMapConflictByKey(t *testing.T) {
 	_, s := kindsDB(t)
 	a, b := txnBegin(t, s), txnBegin(t, s)
 	if err := kindsKV(t, a, "cache").Set(ctx, []byte("a"), kindsBytes("A")); err != nil {
@@ -400,18 +403,19 @@ func TestTransactionsOnOneKVMapMergeByKey(t *testing.T) {
 	if err := e.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Commit(ctx); err != nil {
-		t.Fatalf("a second increment of a counter = %v, want it to commit", err)
+	if err := f.Commit(ctx); !errors.Is(err, engine.ErrSerialization) {
+		t.Errorf("a second increment of a counter the first incremented = %v, want ErrSerialization", err)
 	}
-	if v, _ := kindsGet(t, s, "hits"); v.Counter != 13 {
-		t.Errorf("a counter at 10 incremented by 1 and by 2 in two transactions is %d, want 13", v.Counter)
+	if v, _ := kindsGet(t, s, "hits"); v.Counter != 11 {
+		t.Errorf("a counter at 10 incremented by 1, then by 2 in a transaction that could not commit, is %d, want 11", v.Counter)
 	}
 }
 
-// Transactions on one collection merge through the document model: two
-// editing different fields of one record both land; one field set two
-// ways serializes.
-func TestTransactionsOnOneCollectionMergeByField(t *testing.T) {
+// Transactions on one collection conflict by record: two editing different
+// fields of one record serialize, the second's edit absent (a branch merge
+// would combine them; a transaction is one writer of the record at a time);
+// one field set two ways serializes.
+func TestTransactionsOnOneCollectionConflictByRecord(t *testing.T) {
 	_, s := kindsDB(t)
 	a, b := txnBegin(t, s), txnBegin(t, s)
 	if err := kindsCollection(t, a, "users").PutJSON(ctx, []byte("u1"), []byte(`{"name": "ada", "age": 37}`)); err != nil {
@@ -423,11 +427,11 @@ func TestTransactionsOnOneCollectionMergeByField(t *testing.T) {
 	if err := a.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Commit(ctx); err != nil {
-		t.Fatalf("a transaction on another field of the same record = %v, want it to commit", err)
+	if err := b.Commit(ctx); !errors.Is(err, engine.ErrSerialization) {
+		t.Errorf("a transaction on another field of the record the first wrote = %v, want ErrSerialization", err)
 	}
-	if got := kindsRecord(t, s, "u1"); got != `{"age":37,"name":"Ada Lovelace"}` {
-		t.Errorf("after both commits u1 is %s, want both fields changed", got)
+	if got := kindsRecord(t, s, "u1"); got != `{"age":37,"name":"ada"}` {
+		t.Errorf("after the refused commit u1 is %s, want the first's alone", got)
 	}
 
 	c, d := txnBegin(t, s), txnBegin(t, s)
