@@ -14,6 +14,7 @@ import (
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk/memstore"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/hash"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/model"
+	"github.com/SmithOperatingSolutions/snapshot-core/core/prolly"
 
 	"github.com/SmithOperatingSolutions/snapshot-engine/merge"
 	"github.com/SmithOperatingSolutions/snapshot-engine/model/kv"
@@ -179,6 +180,89 @@ func TestRegression_SE6_AKVLocationHasOneSpelling(t *testing.T) {
 	} {
 		if key, _, err := kv.ParseLocation(loc); !errors.Is(err, kv.ErrKey) {
 			t.Errorf("%s: ParseLocation read a %d-byte key, %v; want ErrKey", name, len(key), err)
+		}
+	}
+}
+
+// allocated is how many bytes f allocated, by the runtime's own count.
+func allocated(f func()) uint64 {
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	f()
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc
+}
+
+// kvReads are the ways an object's values are read: whole, validated,
+// walked for GC, diffed from base, and one key at a time.
+func kvReads(s *memstore.Store, base model.Root, key string) map[string]func(model.Root) error {
+	mdl := kv.Model{Config: cfg()}
+	return map[string]func(model.Root) error{
+		"Read":     func(r model.Root) error { _, err := kv.Read(ctx, s, cfg(), r); return err },
+		"Validate": func(r model.Root) error { return mdl.Validate(ctx, r, s) },
+		"Walk": func(r model.Root) error {
+			return mdl.Walk(ctx, r, s, func(hash.Hash, bool) (bool, error) { return true, nil })
+		},
+		"Diff": func(r model.Root) error {
+			d, err := mdl.Diff(ctx, base, r, s)
+			for err == nil {
+				var ok bool
+				if _, ok, err = d.Next(ctx); !ok {
+					break
+				}
+			}
+			return err
+		},
+		"Get": func(r model.Root) error {
+			m, err := kv.Open(ctx, s, cfg(), r)
+			if err == nil {
+				_, _, err = m.Get(ctx, []byte(key))
+			}
+			return err
+		},
+	}
+}
+
+// A kv value is a frame of at most 1+MaxValueSize bytes, so a stream
+// longer than that is not one of ours, and a stream's claimed length can be
+// many times what it stores (snapshot-core#23). An object holding a value
+// one byte longer than the longest frame must be refused, by every read,
+// with prolly.ErrValueTooLarge and before the stream is read; the longest
+// frame there is reads back by every read (snapshot-engine#7).
+func TestRegression_SE7_AKVObjectReadsNoValueLongerThanAFrame(t *testing.T) {
+	s := memstore.New()
+	small := map[string]kv.Value{"a": bytesValue("x")}
+	base := write(t, s, small)
+	longest := kv.Value{Kind: kv.Bytes, Bytes: bytes.Repeat([]byte("m"), kv.MaxValueSize)}
+	good := write(t, s, with(small, map[string]*kv.Value{"max": &longest}))
+
+	wide := cfg()
+	wide.MaxValue = 8 << 20
+	m, err := prolly.Open(ctx, s, wide, base.Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := m.Editor()
+	if err := e.Put([]byte("max"), append([]byte{byte(kv.Bytes)}, bytes.Repeat([]byte("o"), kv.MaxValueSize+1)...)); err != nil {
+		t.Fatal(err)
+	}
+	if m, err = e.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	over := model.Root{Hash: m.Root(), Size: m.Count(), Format: kv.Format}
+
+	if got, err := kv.Read(ctx, s, cfg(), good); err != nil || !bytes.Equal(got["max"].Bytes, longest.Bytes) {
+		t.Fatalf("positive control: the object holding the longest frame, %d bytes, read back as %d bytes, %v", 1+kv.MaxValueSize, len(got["max"].Bytes), err)
+	}
+	for how, read := range kvReads(s, base, "max") {
+		if err := read(good); err != nil {
+			t.Fatalf("positive control: %s of the object holding the longest frame, %d bytes: %v", how, 1+kv.MaxValueSize, err)
+		}
+		var err error
+		used := allocated(func() { err = read(over) })
+		if !errors.Is(err, prolly.ErrValueTooLarge) || used > 64<<10 {
+			t.Errorf("%s of an object holding a %d-byte value, one byte over the longest frame, allocated %d bytes and returned %v; want prolly.ErrValueTooLarge within 64 KiB: a forged stream is read before it is refused",
+				how, 2+kv.MaxValueSize, used, err)
 		}
 	}
 }
