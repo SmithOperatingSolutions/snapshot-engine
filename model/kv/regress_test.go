@@ -1,6 +1,7 @@
 package kv_test
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"runtime"
@@ -159,5 +160,25 @@ func TestRegression_SE6_ASortedSetMergeIsNotQuadratic(t *testing.T) {
 	}
 	if ceiling := raceScale * 250 * time.Millisecond; best > ceiling {
 		t.Errorf("merging a sorted set of %d members changed on both sides took %v at best, over %v: a key's merge grows with the square of its set", n, best, ceiling)
+	}
+}
+
+// A kv location has one spelling: ParseLocation took a key length written
+// with more varint bytes than it needs, and a key longer than any object
+// holds, so two byte strings named one place and a location could name a
+// key that cannot exist. FuzzParseLocation found the first (#6's fuzz
+// targets). Both are refused; the longest key there is reads back.
+func TestRegression_SE6_AKVLocationHasOneSpelling(t *testing.T) {
+	long := bytes.Repeat([]byte("k"), kv.MaxKeySize)
+	if key, sub, err := kv.ParseLocation(kv.Location(long, []byte("f"))); err != nil || !bytes.Equal(key, long) || string(sub) != "f" {
+		t.Fatalf("the location of a %d-byte key, the longest, read back as a %d-byte key, %q, %v", kv.MaxKeySize, len(key), sub, err)
+	}
+	for name, loc := range map[string][]byte{
+		"a key length in two bytes where one will do": {0x81, 0x00, 'a'},
+		"a key one byte longer than any object holds": kv.Location(append(long, 'k'), nil),
+	} {
+		if key, _, err := kv.ParseLocation(loc); !errors.Is(err, kv.ErrKey) {
+			t.Errorf("%s: ParseLocation read a %d-byte key, %v; want ErrKey", name, len(key), err)
+		}
 	}
 }

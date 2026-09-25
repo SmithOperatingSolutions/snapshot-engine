@@ -29,3 +29,27 @@ func TestALocationNamesAKeyAndWhatIsBelowIt(t *testing.T) {
 		}
 	}
 }
+
+// FuzzParseLocation reads locations: what parses names a key an object
+// can hold, and Location writes it back as the same bytes, so a location
+// has one spelling.
+func FuzzParseLocation(f *testing.F) {
+	for _, loc := range [][]byte{kv.Location([]byte("user:1"), []byte("mail")), kv.Location([]byte("k"), nil), {}, {9, 'a'}, {0, 'f'}, {0x80}} {
+		f.Add(loc)
+	}
+	f.Fuzz(func(t *testing.T, loc []byte) {
+		key, sub, err := kv.ParseLocation(loc)
+		if err != nil {
+			if !errors.Is(err, kv.ErrKey) {
+				t.Fatalf("ParseLocation(%x): %v, want ErrKey", loc, err)
+			}
+			return
+		}
+		if len(key) == 0 || len(key) > kv.MaxKeySize {
+			t.Fatalf("ParseLocation(%x) names a key of %d bytes, which no object holds", loc, len(key))
+		}
+		if back := kv.Location(key, sub); !bytes.Equal(back, loc) {
+			t.Fatalf("ParseLocation(%x) = %q, %q, which Location writes as %x: one place, two spellings", loc, key, sub, back)
+		}
+	})
+}
