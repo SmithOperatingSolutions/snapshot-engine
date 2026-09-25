@@ -504,3 +504,52 @@ lands as a `refactor:` with the bench's before and after figures.
 Items 2, 3, 4, 6, 7, 8 and 11 are core changes: they are asked for in
 snapshot-core, land in its own PR and tag, and the engine moves to that tag
 (DESIGN D2). Items 1, 5, 9 and 10 are the engine's.
+
+## Core v0.2.0 (#7)
+
+The move to snapshot-core v0.2.0, with kv's counters summing in the
+merge and a counter's INCR and DECR leaving the item rule (DESIGN D18,
+#7). W4 and W8 only (`-only W4,W8`), full scale, both backends, each
+run under the shared measurement lock on a quiet machine (load under 2
+and no test or bench process before each run started). "Before" is
+main's engine (4689848) on core v0.1.1; "after" is this branch as it
+ends (8e828cd) on v0.2.0. Every phase checks each counter against the
+sum of its increments, the table balances against theirs and the
+document fields against theirs. No phase of any run lost an update:
+W8's counters, 2,233 and 2,552 increments on disk, 2,957 and 3,031 in
+memory, all accounted for. Load average during each run, median (max):
+disk before 2.04 (3.84), after 1.89 (3.54); memory before 1.70 (2.11),
+after 1.72 (2.87). The disk maxima include a few short builds and
+single-package test runs of the author's during the disk runs.
+
+W4, kv 70% GET, 20% SET, 10% INCR; W8, the sustained mix, 64 sessions
+for 5 minutes. W4 in ops/s, W8 in tx/s; retries are the phase's
+serialization failures, every one retried and committed:
+
+| Phase | Disk before | p99 | retries | Disk after | p99 | retries | Memory before | p99 | retries | Memory after | p99 | retries |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| W4, 1 op/tx, 16 sessions | 427.9 | 143 ms | 1 | 423.6 | 143 ms | 0 | 1,077.4 | 61 ms | 0 | 1,288.7 | 50 ms | 0 |
+| W4, 1 op/tx, 64 sessions | 601.9 | 352 ms | 2 | 604.2 | 369 ms | 0 | 645.4 | 336 ms | 5 | 700.1 | 319 ms | 0 |
+| W4, 100 ops/tx, 16 sessions | 2,399.2 | 1.6 s | 76 | 2,401.4 | 705 ms | 2 | 3,072.2 | 1.0 s | 77 | 2,962.6 | 570 ms | 2 |
+| W4, 100 ops/tx, 64 sessions | 1,777.2 | 10.7 s | 189 | 1,574.2 | 4.2 s | 5 | 1,845.9 | 8.3 s | 202 | 1,743.7 | 7.0 s | 6 |
+| W8, 64 sessions | 252.5 | 386 ms | 5 | 274.2 | 352 ms | 2 | 324.7 | 302 ms | 4 | 336.9 | 285 ms | 6 |
+
+**What changed.** At 100 ops per transaction, where a transaction's ten
+INCRs collide with other transactions' on the same counters, the
+retries fall from 76 to 2 at 16 sessions and from 189 to 5 at 64 on
+disk, and from 77 to 2 and 202 to 6 in memory: those were the item rule
+refusing two INCRs of one counter, and they now sum. The tail latencies
+fall with them, p99 from 1.6 s to 705 ms at 16 sessions and from 10.7 s
+to 4.2 s at 64 on disk. Throughput at 100 ops per transaction and 64
+sessions is 11% lower on disk and 6% lower in memory; at 16 sessions
+and 100 ops it is level on disk and 4% lower in memory. The phases that
+rarely collided (1 op per transaction) and W8 are level or better: W8
+252.5 to 274.2 tx/s on disk, 324.7 to 336.9 in memory, and one op per
+transaction at 16 sessions in memory 1,077 to 1,289. Whether the drop at
+100 ops and 64 sessions is the merge summing counters where the item
+rule refused before, or noise between two runs, one run each cannot
+say; the phase's p99 says the work per transaction is not larger.
+
+**Not confirmed here.** The group-commit section's "next core" column
+took one session of W3 in memory from 214 to 922 tx/s on the unreleased
+core. W3 was not part of these runs; it is measured on v0.2.0 by #8.
