@@ -1,6 +1,8 @@
 package engine_test
 
 import (
+	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/SmithOperatingSolutions/snapshot-engine/engine"
@@ -97,6 +99,79 @@ func TestConcurrentIncrementsOfOneCounterBothCommit(t *testing.T) {
 			}
 			if v, _ := kindsGet(t, s, "hits"); v.Counter != tc.expect {
 				t.Errorf("hits, 1000 with %d and %d added by two transactions, is %d, want %d: an increment was lost", tc.by[0], tc.by[1], v.Counter, tc.expect)
+			}
+		})
+	}
+}
+
+// #7, DESIGN D18: only a counter's write over a counter leaves the item
+// rule. A SET of another kind, or a delete, racing an INCR of one counter
+// still serializes, whichever commits first, and the counter holds the
+// first's write alone; so does a key both transactions turned into the
+// same counter, and a counter both replaced with the same bytes.
+func TestACounterSetOrDeletedWhileIncrementedStillSerializes(t *testing.T) {
+	set := func(key string, v engine.Value) itemWrite {
+		return func(t *testing.T, tx *engine.Txn) {
+			if err := kindsKV(t, tx, "cache").Set(ctx, []byte(key), v); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	del := func(t *testing.T, tx *engine.Txn) {
+		if err := kindsKV(t, tx, "cache").Delete(ctx, []byte("hits")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hitsIs := func(want string) func(t *testing.T, s *engine.Session) string {
+		return func(t *testing.T, s *engine.Session) string {
+			v, ok := kindsGet(t, s, "hits")
+			got := "deleted"
+			switch {
+			case ok && v.Kind == engine.ValueCounter:
+				got = strconv.FormatInt(v.Counter, 10)
+			case ok:
+				got = string(v.Bytes)
+			}
+			if got != want {
+				return "hits is " + got + ", want the first's write alone, " + want
+			}
+			return ""
+		}
+	}
+	for _, tc := range []struct {
+		name          string
+		first, second itemWrite
+		want          func(t *testing.T, s *engine.Session) string
+	}{
+		{"a SET, then an INCR", set("hits", kindsBytes("reset")), counterBy(1), hitsIs("reset")},
+		{"an INCR, then a SET", counterBy(1), set("hits", kindsBytes("reset")), hitsIs("1001")},
+		{"a delete, then an INCR", del, counterBy(1), hitsIs("deleted")},
+		{"an INCR, then a delete", counterBy(1), del, hitsIs("1001")},
+		{"a counter replaced with the same bytes on both", set("hits", kindsBytes("x")), set("hits", kindsBytes("x")), hitsIs("x")},
+		{"a key made the same counter on both", set("a", kindsCounter(5)), set("a", kindsCounter(5)), func(t *testing.T, s *engine.Session) string {
+			if v, _ := kindsGet(t, s, "a"); v.Kind != engine.ValueCounter || v.Counter != 5 {
+				return "a is " + strconv.FormatInt(v.Counter, 10) + ", want the first's counter, 5"
+			}
+			return ""
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, s := counterDB(t)
+			x, y := txnBegin(t, s), txnBegin(t, txnSession(t, db, "main"))
+			tc.first(t, x)
+			tc.second(t, y)
+			if err := x.Commit(ctx); err != nil {
+				t.Fatalf("the first commit: %v", err)
+			}
+			after := txnWS(t, s)
+			if err := y.Commit(ctx); !errors.Is(err, engine.ErrSerialization) {
+				t.Errorf("the second transaction's commit = %v, want ErrSerialization: only a counter's increments sum", err)
+			}
+			if got := txnWS(t, s); got != after {
+				t.Errorf("the refused commit changed the working set (%s, want the first's %s)", got.Short(), after.Short())
+			}
+			if msg := tc.want(t, s); msg != "" {
+				t.Error(msg)
 			}
 		})
 	}

@@ -2371,3 +2371,17 @@ find: counter = counter && ok && v.Kind == kv.Counter
 replace: counter = counter && ok && v.Kind == v.Kind
 pkg: ./engine
 run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
+
+id: engine-a-counter-delta-was-a-counter
+file: engine/txn.go
+find: for i, root := range []model.Root{c.From.Root, c.To.Root} {
+replace: for i, root := range []model.Root{c.To.Root, c.To.Root} {
+pkg: ./engine
+run: ^TestACounterSetOrDeletedWhileIncrementedStillSerializes$
+
+id: engine-a-counter-delta-is-a-counter
+file: engine/txn.go
+find: for i, root := range []model.Root{c.From.Root, c.To.Root} {
+replace: for i, root := range []model.Root{c.From.Root, c.From.Root} {
+pkg: ./engine
+run: ^TestACounterSetOrDeletedWhileIncrementedStillSerializes$
