@@ -2463,6 +2463,13 @@ replace: \t\t\t\treturn nil, true, fmt.Errorf("%w: a transaction committed since
 pkg: ./engine
 run: ^TestARebaseMakesWhatTheMergeMakes$
 
+id: engine-txn-rebase-leaves-a-kv-key-both-wrote-to-the-merge
+file: engine/txn.go
+find: \t\t\tcase errors.Is(err, kv.ErrChangedSince), errors.Is(err, table.ErrSchema):
+replace: \t\t\tcase errors.Is(err, table.ErrSchema):
+pkg: ./engine
+run: ^(TestConcurrentIncrementsOfOneCounterBothCommit|TestARebaseMakesWhatTheMergeMakes)$
+
 id: engine-txn-rebase-leaves-a-schema-change-to-the-merge
 file: engine/txn.go
 find: \t\t\tcase errors.Is(err, table.ErrSchema):\n\t\t\t\treturn nil, false, nil

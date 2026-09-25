@@ -388,7 +388,8 @@ func (m models) rebaser(id model.ID) rebaser {
 // item rule's ErrSerialization, as writeWrite has it. It reports false,
 // leaving the decision to merged, for a change it does not take: an object
 // added, dropped or changed in kind on either side, one of a model without
-// Rebase, a table whose schema differs between the snapshot, ours and cur.
+// Rebase, a table whose schema differs between the snapshot, ours and cur,
+// a kv key both wrote (a counter both incremented sums there, D18).
 func (t *Txn) rebase(ctx context.Context, ours, cur *object.Namespace) (*object.Namespace, bool, error) {
 	d, err := object.Diff(ctx, t.base, ours)
 	if err != nil {
@@ -421,9 +422,12 @@ func (t *Txn) rebase(ctx context.Context, ours, cur *object.Namespace) (*object.
 		if now != c.From { // cur changed it too: its items against ours'
 			root, err := rb.Rebase(ctx, c.From.Root, c.To.Root, now.Root, t.s.db.r.Chunks())
 			switch {
-			case errors.Is(err, table.ErrChangedSince), errors.Is(err, kv.ErrChangedSince), errors.Is(err, document.ErrChangedSince):
+			case errors.Is(err, table.ErrChangedSince), errors.Is(err, document.ErrChangedSince):
 				return nil, true, fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrSerialization)
-			case errors.Is(err, table.ErrSchema):
+			case errors.Is(err, kv.ErrChangedSince), errors.Is(err, table.ErrSchema):
+				// A kv key both wrote may be a counter both incremented,
+				// which is not an item (D18): the merge sums it, and
+				// refuses every other key both wrote as writeWrite has it.
 				return nil, false, nil
 			case err != nil:
 				return nil, false, translate(err)
