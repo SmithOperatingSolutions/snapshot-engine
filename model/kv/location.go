@@ -23,8 +23,11 @@ func Location(key, sub []byte) []byte {
 func ParseLocation(loc []byte) (key, sub []byte, err error) {
 	r := wire.NewReader(loc)
 	key = r.LenBytes(MaxKeySize)
-	if err := r.Err(); err != nil || len(key) == 0 {
-		return nil, nil, fmt.Errorf("%w: a location whose key is not one (%d bytes, %v)", ErrKey, len(key), err)
+	if err := r.Err(); err != nil {
+		return nil, nil, fmt.Errorf("%w: a location whose key is not one: %w", ErrKey, err)
+	}
+	if len(key) == 0 {
+		return nil, nil, fmt.Errorf("%w: a location with an empty key", ErrKey)
 	}
 	return key, loc[len(loc)-r.Remaining():], nil
 }

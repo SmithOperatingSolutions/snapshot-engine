@@ -2095,8 +2095,8 @@ run: ^TestRegression_SE6_AKVLocationHasOneSpelling$
 
 id: kv-a-location-key-is-not-empty
 file: model/kv/location.go
-find: if err := r.Err(); err != nil || len(key) == 0 {
-replace: if err := r.Err(); err != nil {
+find: if len(key) == 0 {
+replace: if false {
 pkg: ./model/kv
 run: ^TestALocationNamesAKeyAndWhatIsBelowIt$
 
