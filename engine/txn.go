@@ -347,12 +347,17 @@ func (t *Txn) Commit(ctx context.Context) (err error) {
 }
 
 // onto is the namespace the transaction makes of cur: its own when cur is
-// its snapshot, else ours merged with cur through the models, refused
-// (ErrSerialization) when an item both wrote (D18) or the merge conflicts.
+// its snapshot, else ours merged with cur through the models (merged).
 func (t *Txn) onto(ctx context.Context, ours, cur *object.Namespace) (*object.Namespace, error) {
 	if cur.Root() == t.base.Root() {
 		return ours, nil
 	}
+	return t.merged(ctx, ours, cur)
+}
+
+// merged is ours merged with cur through the models, refused
+// (ErrSerialization) when an item both wrote (D18) or the merge conflicts.
+func (t *Txn) merged(ctx context.Context, ours, cur *object.Namespace) (*object.Namespace, error) {
 	if err := t.writeWrite(ctx, ours, cur); err != nil {
 		return nil, err
 	}
