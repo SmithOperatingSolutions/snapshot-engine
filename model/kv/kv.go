@@ -32,8 +32,9 @@ type Model struct {
 }
 
 var (
-	_ model.Model  = Model{}
-	_ model.Walker = Model{}
+	_ model.Model       = Model{}
+	_ model.Walker      = Model{}
+	_ model.Accumulator = Model{}
 )
 
 // ID implements model.Model.
@@ -41,6 +42,10 @@ func (Model) ID() model.ID { return ID }
 
 // FormatVersion implements model.Model.
 func (Model) FormatVersion() uint16 { return Format }
+
+// Accumulates implements model.Accumulator: a counter both sides changed
+// alike is two changes, whose deltas both count.
+func (Model) Accumulates() bool { return true }
 
 // maxFrame is the longest value frame: the kind byte and the longest
 // payload.

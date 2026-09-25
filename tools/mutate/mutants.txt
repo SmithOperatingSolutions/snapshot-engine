@@ -2341,3 +2341,12 @@ find: cfg.MaxValue = max(n, 1)
 replace: cfg.MaxValue = n
 pkg: ./model/table
 run: ^TestRegression_SE7_AKeyOnlyTableReadsNoRowValue$
+
+# counters sum (#7)
+
+id: kv-accumulates
+file: model/kv/kv.go
+find: func (Model) Accumulates() bool { return true }
+replace: func (Model) Accumulates() bool { return false }
+pkg: ./engine
+run: ^TestACounterIncrementedOnTwoBranchesMergesToTheSum$
