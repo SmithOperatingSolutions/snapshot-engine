@@ -2474,8 +2474,8 @@ run: ^(TestConcurrentIncrementsOfOneCounterBothCommit|TestARebaseMakesWhatTheMer
 
 id: engine-txn-rebase-leaves-a-schema-change-to-the-merge
 file: engine/txn.go
-find: \t\t\tcase errors.Is(err, table.ErrSchema):\n\t\t\t\treturn nil, false, nil
-replace: \t\t\tcase errors.Is(err, table.ErrSchema):\n\t\t\t\treturn nil, true, translate(err)
+find: \t\t\tcase errors.Is(err, kv.ErrChangedSince), errors.Is(err, table.ErrSchema):
+replace: \t\t\tcase errors.Is(err, kv.ErrChangedSince):
 pkg: ./engine
 run: ^TestARebaseMakesWhatTheMergeMakes$
 
