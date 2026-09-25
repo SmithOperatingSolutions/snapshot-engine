@@ -62,7 +62,7 @@ func (e *Error) Unwrap() error { return e.Kind }
 
 // callerErrors are the engine errors a caller may be shown, most specific
 // first.
-var callerErrors = []error{ErrPermissionDenied, ErrSerialization, ErrNotFound, ErrExists, ErrWrongKind, ErrInvalid, ErrMergeInProgress, ErrInUse, ErrClosed}
+var callerErrors = []error{ErrPermissionDenied, ErrSessionLost, ErrSerialization, ErrNotFound, ErrExists, ErrWrongKind, ErrInvalid, ErrMergeInProgress, ErrInUse, ErrClosed}
 
 // scrub is what the API returns in place of err: the engine error it
 // matches (ErrInternal when none) and a fresh correlation id, the details
@@ -122,6 +122,8 @@ func translate(err error) error {
 		to = ErrMergeInProgress
 	case errors.Is(err, vcs.ErrBranchInUse):
 		to = ErrInUse
+	case errors.Is(err, vcs.ErrSessionLost):
+		to = ErrSessionLost
 	default:
 		return err
 	}

@@ -1805,3 +1805,68 @@ find: if len(rec.indexes) != len(schema.Indexes) {
 replace: if len(rec.indexes) != len(schema.Indexes) && false {
 pkg: ./model/table
 run: ^TestTheRootIsTheDocumentedRecord$
+
+# engine maintenance
+
+id: engine-collect-refuses-a-closed-database
+file: engine/maintenance.go
+find: if d.isClosed() {\n\t\treturn CollectReport{}, ErrClosed
+replace: if false {\n\t\treturn CollectReport{}, ErrClosed
+pkg: ./engine
+run: ^TestCollectIsRefusedWhereItMayNotRun$
+
+id: engine-collect-refuses-a-negative-grace-window
+file: engine/maintenance.go
+find: if grace < 0 {
+replace: if false {
+pkg: ./engine
+run: ^TestCollectIsRefusedWhereItMayNotRun$
+
+id: engine-collect-defaults-to-seven-days
+file: engine/maintenance.go
+find: grace = DefaultGrace
+replace: grace = time.Hour
+pkg: ./engine
+run: ^TestCollectKeepsUnreachableDataForTheDefaultGraceWindow$
+
+id: engine-collect-asks-the-databases-authorizer
+file: engine/maintenance.go
+find: repo.GC(ctx, p, d.o.repo(d.models), grace)
+replace: repo.GC(ctx, p, Options{Blobs: d.o.Blobs, Keys: d.o.Keys, Authorizer: AllowAll(), Clock: d.o.Clock}.repo(d.models), grace)
+pkg: ./engine
+run: ^TestCollectIsRefusedWhereItMayNotRun$
+
+id: engine-collect-scrubs-its-errors
+file: engine/maintenance.go
+find: defer d.scrubInto(ctx, &err)
+replace: defer func() {}()
+pkg: ./engine
+run: ^TestCollectIsRefusedWhereItMayNotRun$
+
+id: engine-collect-counts-deleted-packs
+file: engine/maintenance.go
+find: out.DeletedPacks++
+replace: out.DeletedIndexes++
+pkg: ./engine
+run: ^TestCollectReclaimsWhatNothingReaches$
+
+id: engine-collect-counts-deleted-indexes
+file: engine/maintenance.go
+find: case strings.HasPrefix(name, "index/"):\n\t\t\tout.DeletedIndexes++
+replace: case strings.HasPrefix(name, "index/"):
+pkg: ./engine
+run: ^TestCollectReclaimsWhatNothingReaches$
+
+id: engine-a-reclaimed-write-is-session-lost
+file: engine/errors.go
+find: case errors.Is(err, vcs.ErrSessionLost):
+replace: case false:
+pkg: ./engine
+run: ^TestAWriteACollectionReclaimedLosesTheSession$
+
+id: engine-session-lost-reaches-the-caller
+file: engine/errors.go
+find: ErrPermissionDenied, ErrSessionLost, ErrSerialization
+replace: ErrPermissionDenied, ErrSerialization
+pkg: ./engine
+run: ^TestAWriteACollectionReclaimedLosesTheSession$
