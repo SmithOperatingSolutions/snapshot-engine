@@ -3,6 +3,7 @@ package kv_test
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"math"
 	"testing"
 
@@ -163,6 +164,19 @@ func TestKindFramesThatAreNotValuesAreRefused(t *testing.T) {
 		if _, err := kv.DecodeValue(f); err == nil {
 			t.Errorf("%s: decoded as a value", name)
 		}
+	}
+	// A count over MaxMembers is refused even where the frame's bytes hold
+	// every member: a sequence of empty elements takes one byte each, so
+	// MaxMembers+1 of them fit in a frame, and the count's bound is all that
+	// refuses them. MaxMembers of them decode.
+	empties := func(n int) []byte {
+		return append(binary.AppendUvarint([]byte{byte(kv.Sequence)}, uint64(n)), make([]byte, n)...)
+	}
+	if v, err := kv.DecodeValue(empties(kv.MaxMembers)); err != nil || len(v.Seq) != kv.MaxMembers {
+		t.Fatalf("a sequence of %d empty elements, the most there may be, decoded as %d, %v", kv.MaxMembers, len(v.Seq), err)
+	}
+	if v, err := kv.DecodeValue(empties(kv.MaxMembers + 1)); !errors.Is(err, kv.ErrValue) {
+		t.Errorf("a sequence of %d empty elements, one over the limit, decoded as %d, %v; want ErrValue", kv.MaxMembers+1, len(v.Seq), err)
 	}
 	tooMany := make([]kv.Member, kv.MaxMembers+1)
 	for i := range tooMany {
