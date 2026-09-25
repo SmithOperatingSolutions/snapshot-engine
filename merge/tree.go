@@ -216,19 +216,26 @@ func mergeNode(r *Result[Node], path Path, b, o, t *Node, opts TreeOptions) (Nod
 	return deref(b)
 }
 
-// mergeFields merges two objects field by field over the union of names.
+// mergeFields merges two objects field by field over the union of names,
+// each object's fields indexed once by name.
 func mergeFields(r *Result[Node], path Path, b, o, t *Node, opts TreeOptions) Node {
+	var byName [3]map[string]*Node
 	names := map[string]bool{}
-	for _, n := range []*Node{b, o, t} {
-		if n != nil {
-			for _, f := range n.Fields {
+	for i, n := range []*Node{b, o, t} {
+		if n == nil {
+			continue
+		}
+		byName[i] = make(map[string]*Node, len(n.Fields))
+		for j := range n.Fields {
+			if f := &n.Fields[j]; byName[i][f.Name] == nil { // the first of a name, if a caller repeated one
+				byName[i][f.Name] = &f.Value
 				names[f.Name] = true
 			}
 		}
 	}
 	var out []Field
 	for _, name := range sortedKeys(names) {
-		v, ok := mergeNode(r, append(append(Path(nil), path...), name), field(b, name), field(o, name), field(t, name), opts)
+		v, ok := mergeNode(r, append(append(Path(nil), path...), name), byName[0][name], byName[1][name], byName[2][name], opts)
 		if ok {
 			out = append(out, Field{Name: name, Value: v})
 		}
@@ -304,18 +311,6 @@ func deref(n *Node) (Node, bool) {
 		return Node{}, false
 	}
 	return *n, true
-}
-
-func field(n *Node, name string) *Node {
-	if n == nil {
-		return nil
-	}
-	for i := range n.Fields {
-		if n.Fields[i].Name == name {
-			return &n.Fields[i].Value
-		}
-	}
-	return nil
 }
 
 func sortedKeys(m map[string]bool) []string {
