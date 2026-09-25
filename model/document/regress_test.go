@@ -69,7 +69,7 @@ func TestRegression_SE5_ReadingACollectionSizesNothingFromItsRootsClaim(t *testi
 
 // An array one side changed by more than merge.MaxSequenceEdits while the
 // other changed it too is a conflict located at the array's field, naming
-// the budget; at the budget it merges (snapshot-engine#4, DESIGN D18).
+// the budget; at the budget it merges (snapshot-engine#4, DESIGN D19).
 func TestRegression_SE4_AnArrayPastTheEditBudgetConflictsAtItsField(t *testing.T) {
 	elems := make([]merge.Node, 600)
 	for i := range elems {

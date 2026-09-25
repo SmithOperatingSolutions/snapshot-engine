@@ -100,7 +100,7 @@ func TestRegression_SE5_AFrameSizesNothingFromItsClaimedCount(t *testing.T) {
 // A sequence one side changed by more than merge.MaxSequenceEdits while
 // the other changed it too is a conflict at the key, whose reason says the
 // list was changed too much to align rather than naming a position; at the
-// budget it merges (snapshot-engine#4, DESIGN D18).
+// budget it merges (snapshot-engine#4, DESIGN D19).
 func TestRegression_SE4_AKVSequencePastTheEditBudgetConflictsAtTheKey(t *testing.T) {
 	elems := make([]string, 600)
 	for i := range elems {

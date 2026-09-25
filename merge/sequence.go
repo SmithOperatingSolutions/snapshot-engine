@@ -8,7 +8,7 @@ import (
 // MaxSequenceEdits is the most insertions and deletions (a replaced
 // element is one of each) Sequence aligns between the base and either
 // side. Past it the merge is a conflict at the list, never an allocation
-// or a search that grows with the square of the list (DESIGN D18,
+// or a search that grows with the square of the list (DESIGN D19,
 // snapshot-engine#4).
 const MaxSequenceEdits = 1000
 
