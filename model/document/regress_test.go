@@ -108,3 +108,75 @@ func TestRegression_SE4_AnArrayPastTheEditBudgetConflictsAtItsField(t *testing.T
 		t.Errorf("the conflict is at %q %v (%v), saying %q: want record doc, field list, naming the budget", id, path, err, res.Conflicts[0].Reason)
 	}
 }
+
+// Parsing a document costs memory in proportion to its text: a 1 MiB
+// [0,0,…] allocated 305 times its size as its arrays grew and were
+// copied, and kept hundreds of megabytes live at its peak
+// (snapshot-engine#6). Each value needs its node, 88 bytes, and strings
+// copy their text, so the budget is 128 bytes a value and twice the text;
+// the positive control is that each document parses to its values.
+func TestRegression_SE6_ParsingCostsMemoryInProportionToTheText(t *testing.T) {
+	const n = 1 << 15
+	fields := make([]string, n)
+	for i := range fields {
+		fields[i] = `"f` + strconv.Itoa(i) + `":0`
+	}
+	for _, c := range []struct {
+		what, text string
+		elems      int
+	}{
+		{"zeros", "[" + strings.Repeat("0,", n-1) + "0]", n},
+		{"empty objects", "[" + strings.Repeat("{},", n-1) + "{}]", n},
+		{"empty strings", "[" + strings.Repeat(`"",`, n-1) + `""]`, n},
+		{"empty arrays", "[" + strings.Repeat("[],", n-1) + "[]]", n},
+		{"numbers", "[" + strings.Repeat("1.5e2,", n-1) + "7]", n},
+		{"fields", "{" + strings.Join(fields, ",") + "}", n},
+	} {
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		got, err := document.Parse([]byte(c.text))
+		runtime.ReadMemStats(&after)
+		if err != nil || len(got.Elems)+len(got.Fields) != c.elems {
+			t.Fatalf("%s: a document of %d values parsed to %d, %v", c.what, c.elems, len(got.Elems)+len(got.Fields), err)
+		}
+		if grew, budget := after.TotalAlloc-before.TotalAlloc, uint64(128*c.elems+2*len(c.text)); grew > budget {
+			t.Errorf("%s: parsing %d values in %d bytes of text allocated %d bytes, %d times the text, over %d: a 1 MiB document costs hundreds of megabytes", c.what, c.elems, len(c.text), grew, grew/uint64(len(c.text)), budget)
+		}
+	}
+}
+
+// A document whose canonical text would pass MaxDocument is refused as it
+// is parsed, before the text is built: "1e999" is five bytes that stand for
+// a thousand digits, so 60 KB of them asked for 10 MB of numbers before
+// EncodeRecord refused the result (snapshot-engine#6). At exactly
+// MaxDocument bytes of canonical text a document parses and is stored.
+func TestRegression_SE6_ADocumentPastTheLimitOnceCanonicalIsRefusedAsItIsParsed(t *testing.T) {
+	const k = 1047 // "1e999"s: 1047 thousand-digit numbers, their commas and the brackets are 1,048,048 bytes
+	doc := func(pad int) string {
+		return "[" + strings.Repeat("1e999,", k) + `"` + strings.Repeat("x", pad) + `"]`
+	}
+	// Positive control: 525 bytes of padding make the canonical text
+	// exactly MaxDocument bytes.
+	n, err := document.Parse([]byte(doc(525)))
+	if err != nil {
+		t.Fatalf("a document whose canonical text is exactly %d bytes is refused: %v", document.MaxDocument, err)
+	}
+	if rec, err := document.EncodeRecord(n); err != nil || len(rec) != 1+document.MaxDocument {
+		t.Fatalf("a document whose canonical text is exactly %d bytes is not stored: %d bytes, %v", document.MaxDocument, len(rec), err)
+	}
+	if n, err := document.Parse([]byte(doc(526))); !errors.Is(err, document.ErrDocument) {
+		t.Errorf("a document whose canonical text is %d bytes, one over the limit, parsed (%d bytes once canonical, %v): want ErrDocument", document.MaxDocument+1, len(document.Encode(n)), err)
+	}
+
+	text := "[" + strings.Repeat("1e999,", 10000) + "1e999]"
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err = document.Parse([]byte(text))
+	runtime.ReadMemStats(&after)
+	if !errors.Is(err, document.ErrDocument) {
+		t.Errorf("%d bytes of 1e999 standing for 10 MB of digits parsed (%v): want ErrDocument, the limit being %d bytes of canonical text", len(text), err, document.MaxDocument)
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 4<<20 {
+		t.Errorf("refusing %d bytes of 1e999 allocated %d bytes: a document is built out past its limit before it is refused", len(text), grew)
+	}
+}

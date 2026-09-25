@@ -127,8 +127,8 @@ func FuzzParse(f *testing.F) {
 			return
 		}
 		enc := document.Encode(n)
-		if len(enc) > document.MaxDocument+2 {
-			t.Fatalf("%d bytes of input encoded to %d bytes", len(text), len(enc))
+		if len(enc) > document.MaxDocument {
+			t.Fatalf("%d bytes of input encoded to %d bytes, over MaxDocument", len(text), len(enc))
 		}
 		again, err := document.Parse(enc)
 		if err != nil {
