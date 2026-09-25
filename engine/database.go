@@ -40,14 +40,11 @@ type Database struct {
 	mu     sync.Mutex
 	closed bool
 
+	qmu    sync.Mutex
+	queues map[string]*branchQueue // each branch's commit queue, while it holds a call (queue.go)
+
 	beforePublish func(members int) // a test seam: called before every publish of transactions
 }
-
-// maxBatch is the most transactions one publish carries.
-const maxBatch = 64
-
-// queued is how many calls wait in branch's commit queue.
-func (d *Database) queued(branch string) int { return 0 }
 
 // models is every model the engine registers, configured for one geometry.
 type models struct {
@@ -70,7 +67,7 @@ func modelsFor(g repo.Geometry) (models, error) {
 }
 
 func (o Options) repo(m models) repo.Options {
-	return repo.Options{Blobs: o.Blobs, Keys: o.Keys, Registry: m.registry, Authorizer: o.Authorizer, Clock: o.Clock, Geometry: m.geometry}
+	return repo.Options{Blobs: o.Blobs, Keys: o.Keys, Registry: m.registry, Authorizer: batchAuthorizer{o.Authorizer}, Clock: o.Clock, Geometry: m.geometry}
 }
 
 // Create makes a new database on o.Blobs, owned by p, with main as its

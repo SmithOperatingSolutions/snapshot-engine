@@ -28,7 +28,7 @@ type Txn struct {
 	objs   map[string]*txnObject
 	closed bool
 
-	beforeSwap func() // a test seam: called before every swap Commit attempts
+	beforeSwap func() // a test seam: called before every swap of a publish carrying the transaction
 }
 
 // txnObject is an object the transaction touched: opened, created or
@@ -46,8 +46,9 @@ type handle interface {
 	drop()                           // the object was dropped: refuse every call after
 }
 
-// maxCommitAttempts is how many times Commit re-reads, merges and swaps
-// before it gives up with ErrSerialization.
+// maxCommitAttempts is how many times a batch of commits is rebuilt on a
+// root another process moved, and swapped, before its members give up
+// with ErrSerialization.
 const maxCommitAttempts = 5
 
 // begin opens a transaction for s on its branch's working set as of now.
@@ -321,11 +322,14 @@ func (t *Txn) namespace(ctx context.Context) (*object.Namespace, error) {
 }
 
 // Commit makes the transaction's changes part of the branch's working set:
-// all of them or, with ErrSerialization, none. If the working set moved
-// since Begin, the transaction's changes are merged with what landed,
-// through the models; a collision anywhere is ErrSerialization. A swap lost
-// to a commit landing between the read and the swap is tried again, up to
-// maxCommitAttempts times. The transaction is finished whatever happens.
+// all of them or, with ErrSerialization, none. It waits its turn in the
+// branch's commit queue and is published with the transactions queued
+// with it (DESIGN D20), each checked alone: if the working set moved since
+// Begin, the transaction's changes are merged with what landed, through
+// the models, and a collision anywhere is ErrSerialization. A swap lost to
+// another process is tried again, up to maxCommitAttempts times. A context
+// that ends while the commit waits takes it out of the queue, changing
+// nothing. The transaction is finished whatever happens.
 func (t *Txn) Commit(ctx context.Context) (err error) {
 	defer t.s.db.scrubInto(ctx, &err)
 	if err := t.check(); err != nil {
@@ -339,51 +343,30 @@ func (t *Txn) Commit(ctx context.Context) (err error) {
 	if ours.Root() == t.base.Root() {
 		return nil // nothing changed
 	}
-	r := t.s.db.r
-	for range maxCommitAttempts {
-		cur, err := r.WorkingSet(ctx, t.s.p, t.s.branch)
-		if err != nil {
-			return translate(err)
-		}
-		if cur.Merge != nil {
-			return ErrMergeInProgress
-		}
-		next := cur
-		if cur.Working == t.ws.Working {
-			next.Working = ours.Root()
-		} else {
-			theirs, err := r.Namespace(ctx, cur.Working)
-			if err != nil {
-				return translate(err)
-			}
-			if err := t.writeWrite(ctx, ours, theirs); err != nil {
-				return err
-			}
-			res, err := merge.Merge(ctx, t.s.db.models.registry, t.base, ours, theirs, r.Chunks(), merge.Options{})
-			if errors.Is(err, merge.ErrTooManyConflicts) {
-				return fmt.Errorf("%w (%w)", ErrSerialization, err)
-			}
-			if err != nil {
-				return translate(err)
-			}
-			if len(res.Conflicts) > 0 {
-				return ErrSerialization
-			}
-			next.Working = res.Merged.Root()
-		}
-		next.Staged = next.Working // the engine keeps no staging area
-		if t.beforeSwap != nil {
-			t.beforeSwap()
-		}
-		if t.s.db.beforePublish != nil {
-			t.s.db.beforePublish(1)
-		}
-		_, err = r.UpdateWorkingSet(ctx, t.s.p, t.s.branch, cur, next)
-		if !errors.Is(err, vcs.ErrConflict) {
-			return translate(err)
-		}
+	return t.s.db.enqueue(t.s.branch, &queued{ctx: ctx, tx: t, ours: ours})
+}
+
+// onto is the namespace the transaction makes of cur: its own when cur is
+// its snapshot, else ours merged with cur through the models, refused
+// (ErrSerialization) when an item both wrote (D18) or the merge conflicts.
+func (t *Txn) onto(ctx context.Context, ours, cur *object.Namespace) (*object.Namespace, error) {
+	if cur.Root() == t.base.Root() {
+		return ours, nil
 	}
-	return fmt.Errorf("%w: the working set moved under %d attempts in a row", ErrSerialization, maxCommitAttempts)
+	if err := t.writeWrite(ctx, ours, cur); err != nil {
+		return nil, err
+	}
+	res, err := merge.Merge(ctx, t.s.db.models.registry, t.base, ours, cur, t.s.db.r.Chunks(), merge.Options{})
+	if errors.Is(err, merge.ErrTooManyConflicts) {
+		return nil, fmt.Errorf("%w (%w)", ErrSerialization, err)
+	}
+	if err != nil {
+		return nil, translate(err)
+	}
+	if len(res.Conflicts) > 0 {
+		return nil, ErrSerialization
+	}
+	return res.Merged, nil
 }
 
 // writeWrite is ErrSerialization when ours and theirs, each against the

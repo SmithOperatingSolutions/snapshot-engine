@@ -214,8 +214,9 @@ func message(m string) error {
 // Commit records the branch's working set as a commit by the session's
 // principal onto the branch's head. An unchanged working set is committed
 // too: a commit records the working set, as the core does, whether or not
-// it changed. Mid-merge, with conflicts unresolved, it is
-// ErrMergeInProgress.
+// it changed. It takes its turn in the branch's commit queue (DESIGN D20),
+// so it records every transaction queued before it and none queued after.
+// Mid-merge, with conflicts unresolved, it is ErrMergeInProgress.
 func (s *Session) Commit(ctx context.Context, msg string) (_ Hash, err error) {
 	defer s.db.scrubInto(ctx, &err)
 	if err := s.ready(); err != nil {
@@ -224,11 +225,13 @@ func (s *Session) Commit(ctx context.Context, msg string) (_ Hash, err error) {
 	if err := message(msg); err != nil {
 		return Hash{}, err
 	}
-	c, err := s.db.r.CommitWorkingSet(ctx, s.p, s.branch, msg)
-	if err != nil {
-		return Hash{}, translate(err)
-	}
-	return c.Hash, nil
+	var c vcs.Commit
+	err = s.db.enqueue(s.branch, &queued{ctx: ctx, op: func(ctx context.Context) error {
+		var err error
+		c, err = s.db.r.CommitWorkingSet(ctx, s.p, s.branch, msg)
+		return translate(err)
+	}})
+	return c.Hash, err
 }
 
 // Merge merges from into the session's branch through the models: clean, it
@@ -236,7 +239,9 @@ func (s *Session) Commit(ctx context.Context, msg string) (_ Hash, err error) {
 // and from's commit, as one call (refused or failed at the commit, the
 // merge is undone); with conflicts the branch is left mid-merge (a Commit
 // or another Merge is ErrMergeInProgress until AbortMerge); a commit the
-// branch already holds merges to nothing and returns the head.
+// branch already holds merges to nothing and returns the head. It takes
+// its turn in the branch's commit queue (DESIGN D20), after every
+// transaction queued before it.
 func (s *Session) Merge(ctx context.Context, from Ref, msg string) (_ MergeResult, err error) {
 	defer s.db.scrubInto(ctx, &err)
 	if err := s.ready(); err != nil {
@@ -245,6 +250,17 @@ func (s *Session) Merge(ctx context.Context, from Ref, msg string) (_ MergeResul
 	if err := message(msg); err != nil {
 		return MergeResult{}, err
 	}
+	var out MergeResult
+	err = s.db.enqueue(s.branch, &queued{ctx: ctx, op: func(ctx context.Context) error {
+		var err error
+		out, err = s.merge(ctx, from, msg)
+		return err
+	}})
+	return out, err
+}
+
+// merge is Merge's work, in its turn in the branch's commit queue.
+func (s *Session) merge(ctx context.Context, from Ref, msg string) (MergeResult, error) {
 	ws, err := s.db.r.WorkingSet(ctx, s.p, s.branch)
 	if err != nil {
 		return MergeResult{}, translate(err)
