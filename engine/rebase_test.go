@@ -57,6 +57,9 @@ func rebaseFixture(t *testing.T) (*Database, *Session) {
 		if err != nil {
 			return err
 		}
+		if err := cache.Set(ctx, []byte("hits"), Value{Kind: ValueCounter, Counter: 1000}); err != nil {
+			return err
+		}
 		for i := range 300 {
 			if _, err := people.Insert(ctx, Row{1: int64(i), 2: "p"}); err != nil {
 				return err
@@ -132,6 +135,21 @@ func setKey(i int, v string) rebaseEdit {
 	}
 }
 
+// incrHits reads the counter hits and writes it back by more, as INCR is run.
+func incrHits(by int64) rebaseEdit {
+	return func(ctx context.Context, tx *Txn) error {
+		m, err := tx.KV(ctx, "cache")
+		if err != nil {
+			return err
+		}
+		v, _, err := m.Get(ctx, []byte("hits"))
+		if err != nil {
+			return err
+		}
+		return m.Set(ctx, []byte("hits"), Value{Kind: ValueCounter, Counter: v.Counter + by})
+	}
+}
+
 func setRecord(i int, text string) rebaseEdit {
 	return func(ctx context.Context, tx *Txn) error {
 		c, err := tx.Collection(ctx, "docs")
@@ -186,7 +204,8 @@ func all(edits ...rebaseEdit) rebaseEdit {
 // takes: rows, keys and records changed on either side, objects only one
 // side touched; an item both changed is ErrSerialization from either. A
 // change the rebase does not take (a schema changed on either side, an
-// object created or dropped) is left to the merge, which still decides it.
+// object created or dropped, a counter both incremented, which the merge
+// sums, D18) is left to the merge, which still decides it.
 func TestARebaseMakesWhatTheMergeMakes(t *testing.T) {
 	ctx := context.Background()
 	for _, c := range []struct {
@@ -201,7 +220,8 @@ func TestARebaseMakesWhatTheMergeMakes(t *testing.T) {
 		{"one row, the same value", setRow(1, "same"), setRow(1, "same"), true, true},
 		{"one row, different cells", setRow(1, "o"), setAge(1, 40), true, true},
 		{"one row added on both", addRow(900), addRow(900), true, true},
-		{"one key", setKey(9, "o"), setKey(9, "c"), true, true},
+		{"one key", setKey(9, "o"), setKey(9, "c"), false, true},
+		{"one counter both incremented", incrHits(1), incrHits(1), false, false},
 		{"one record, different fields", setRecord(9, `{"n":1,"a":1}`), setRecord(9, `{"n":1,"b":1}`), true, true},
 		{"a schema changed by cur", setRow(1, "o"), alterPeople, false, true},
 		{"a schema changed by ours", alterPeople, setRow(1, "c"), false, true},
