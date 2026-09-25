@@ -2434,3 +2434,52 @@ find: \tctx := context.WithoutCancel(batch[0].ctx)
 replace: \tctx := batch[0].ctx
 pkg: ./engine
 run: ^TestABatchRunsUntilItsLatestMembersDeadline$
+
+id: engine-txn-rebase-takes-only-objects-modified-on-both-sides
+file: engine/txn.go
+find: \t\tif c.From.Model != c.To.Model || rb == nil {\n\t\t\treturn nil, false, nil
+replace: \t\tif rb == nil {\n\t\t\treturn nil, false, nil
+pkg: ./engine
+run: ^TestARebaseMakesWhatTheMergeMakes$
+
+id: engine-txn-rebase-leaves-an-object-cur-dropped-to-the-merge
+file: engine/txn.go
+find: \t\tif !held || now.Model != c.From.Model {
+replace: \t\tif (!held || now.Model != c.From.Model) && false {
+pkg: ./engine
+run: ^TestARebaseMakesWhatTheMergeMakes$
+
+id: engine-txn-rebase-an-object-cur-changed-too-goes-through-its-model
+file: engine/txn.go
+find: \t\tif now != c.From { // cur changed it too: its items against ours'
+replace: \t\tif false { // cur changed it too: its items against ours'
+pkg: ./engine
+run: ^TestARebaseMakesWhatTheMergeMakes$
+
+id: engine-txn-rebase-an-item-both-changed-serializes
+file: engine/txn.go
+find: \t\t\t\treturn nil, true, fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrSerialization)
+replace: \t\t\t\treturn nil, true, fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrInternal)
+pkg: ./engine
+run: ^TestARebaseMakesWhatTheMergeMakes$
+
+id: engine-txn-rebase-leaves-a-schema-change-to-the-merge
+file: engine/txn.go
+find: \t\t\tcase errors.Is(err, table.ErrSchema):\n\t\t\t\treturn nil, false, nil
+replace: \t\t\tcase errors.Is(err, table.ErrSchema):\n\t\t\t\treturn nil, true, translate(err)
+pkg: ./engine
+run: ^TestARebaseMakesWhatTheMergeMakes$
+
+id: engine-txn-rebase-lands-the-rebased-object
+file: engine/txn.go
+find: \t\t\tnext = object.Ref{Model: c.To.Model, Root: root}
+replace: \t\t\t_ = root
+pkg: ./engine
+run: ^TestARebaseMakesWhatTheMergeMakes$
+
+id: engine-txn-a-commit-onto-a-moved-working-set-is-rebased
+file: engine/txn.go
+find: \tif next, ok, err := t.rebase(ctx, ours, cur); err != nil || ok {\n\t\treturn next, err\n\t}
+replace: 
+pkg: ./engine
+run: ^TestACommitOntoAMovedWorkingSetReadsItsOwnChangesNotWhatMoved$

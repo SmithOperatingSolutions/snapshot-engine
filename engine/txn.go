@@ -403,8 +403,11 @@ func (t *Txn) rebase(ctx context.Context, ours, cur *object.Namespace) (*object.
 		if !ok {
 			break
 		}
+		// An object added has no model before, one dropped none after
+		// (no rebaser), so only one modified in place, of one model
+		// with a Rebase, is taken.
 		rb := t.s.db.models.rebaser(c.To.Model)
-		if c.Kind != prolly.Modified || c.From.Model != c.To.Model || rb == nil {
+		if c.From.Model != c.To.Model || rb == nil {
 			return nil, false, nil
 		}
 		now, _, held, err := cur.Get(ctx, c.Path)
