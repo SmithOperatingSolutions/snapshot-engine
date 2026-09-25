@@ -29,6 +29,21 @@ The engine takes the core by tag (`go.mod`) and never tracks its items here.
 Adapters (RESP, Mongo, MySQL, pgwire, filesystems) are separate repositories
 with their own progress; they import `engine/` alone.
 
+## Open work
+
+Tracked as GitHub issues on SmithOperatingSolutions/snapshot-engine, not here:
+
+- #7 move to snapshot-core v0.2.0: `stream.ReadAll`'s limit, model value limits, counters that sum and leave the item rule
+- #8 group commit: the batch leader is the ceiling above 16 sessions (in progress on `batch-diff`)
+- #9 read your writes without flushing (performance item 5)
+- #10 fetch an index lookup's rows in key order (performance item 9)
+- #11 decisions made during the performance and bounds work, for review
+- #12 purge for legal deletion: build, plan, or document the limitation
+- #13 the first push: CI on GitHub, E0's last item, closing #2 to #6
+- #1 the performance review; its comments record where it stands
+
+The core's side: snapshot-core#29 to #33.
+
 ## Checklists
 
 ### E0 Foundations
