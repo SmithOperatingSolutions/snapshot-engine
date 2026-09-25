@@ -83,6 +83,106 @@ before committing. A real property failure found later is minimized and
 checked in as a regression case. Check that a property's cases reach the
 inputs it is about.
 
+**Resource bugs have bounded reds.** A bug that costs memory, time or loop
+iterations is proven the same way as any other, with a failing test first.
+The red asserts a small budget that the unfixed code measurably exceeds on
+a small input, and it never reproduces the blow-up itself. Budgets used here:
+- a `runtime.MemStats` `TotalAlloc` delta over a few hundred KiB
+- a counter of reads, visits or root swaps
+- growth between two input sizes
+
+The red run should allocate tens of MB at most.
+
+## Where work is tracked, and how it lands
+
+- **Issues.** Every piece of work, open question and decision to revisit is
+  an issue on SmithOperatingSolutions/snapshot-engine. A PR closes its issues
+  with one keyword per issue (`Closes #3`, then `Closes #4` on the next line).
+  GitHub closes only the first issue in "Closes #3, #4".
+- **Branches.** One branch per batch of issues, started from `origin/main`,
+  with one PR. The PR is squash-merged with its description as the commit
+  body. The branch is kept afterwards, because it holds the test-first
+  history the squash hides.
+- **Before calling a branch done:** run `mise run redcheck` over the branch,
+  `mise run mutate` over the whole catalog, then `go tool ci -only` for fmt,
+  vet, lint, race and cover. Update `docs/PROGRESS.md`, and `docs/DESIGN.md`
+  for any decision. Design rows are numbered D1 onward, and a new one takes
+  the next free number.
+
+## Working against an unreleased core
+
+This module requires snapshot-core by tag. When a change needs core behavior
+that is not tagged yet:
+
+1. Make the change in snapshot-core, in its own branch and PR, following its
+   CONTRIBUTING.
+2. Build the engine against that core checkout with an **uncommitted**
+   workspace. `go.work` is gitignored, and is never committed:
+   ```
+   go work init . ../snapshot-core
+   ```
+3. `redcheck` checks each `test:` commit out in a scratch worktree, which has
+   no `go.work`. A red that needs the untagged core cannot build there, so
+   verify it by hand: in a throwaway worktree with the workspace, it must
+   show failing tests and no build failures. Say so in the commit body.
+4. Once the core is tagged, move this module to the tag (`go get
+   github.com/SmithOperatingSolutions/snapshot-core@vX.Y.Z`, then `go mod
+   tidy`) as the **first** commit of the branch. Every later commit then
+   builds against the tag, and redcheck judges every red itself.
+
+## Heavy runs
+
+The race suite, fuzzing, the mutant catalog and the load tool can use many
+gigabytes. Once, 17 uncapped fuzz workers took a 62 GB host out of memory and
+killed every session on it. On a shared or development machine:
+
+- Run each heavy command under a memory ceiling of its own, so a runaway
+  kills only itself:
+  ```
+  systemd-run --user --scope -q -p MemoryMax=6G -p MemorySwapMax=0 go tool mutate -j 2
+  ```
+- Run the race suite over several packages with `GOFLAGS=-p=2`.
+- Fuzz with at most 4 workers under `GOMEMLIMIT=2GiB`. The core's `tools/ci`
+  sets both from v0.2.0 on, through `-fuzzparallel` and `-fuzzmemlimit`.
+
+## Performance work
+
+The load tool is `tools/bench`, and `docs/PERFORMANCE.md` explains its
+workloads (W1 to W8), scales and flags. It drives a database through
+`engine/` alone, as an adapter would, and checks every increment against an
+authority, so a lost update fails the run.
+
+- **Measure on a quiet machine.** Check that the load average is under 2 and
+  that no other tests or benches are running. Record the load in the report.
+  Before and after runs use the same machine, scale and flags.
+- **Serialize timed runs.** When several people or agents share a machine,
+  take one lock per timed run:
+  ```
+  flock /path/to/measure.lock go run ./tools/bench ...
+  ```
+  Take it for one run at a time, not a chain of runs, so others can
+  interleave.
+- **Where the figures go.** They go in the `refactor:` commit body and in
+  `docs/PERFORMANCE.md`, and as a comment on the performance issue (#1). The
+  ranked list of candidate changes is at the end of `docs/PERFORMANCE.md`.
+
+## The mutant catalog
+
+`tools/mutate/mutants.txt` is a list of stanzas separated by exactly one
+blank line:
+- `id` is unique.
+- `file` is the source file to mutate.
+- `find` is the exact text to replace, with `\n` and `\t` escapes, and must
+  occur exactly once in its file.
+- `replace` is the mutation.
+- `pkg` and `run` name the tests that must kill it.
+
+When code moves, re-anchor its mutants in a `chore(mutate):` commit. When two
+branches both append stanzas, a rebase can drop the blank line between them,
+and the tool then fails with "id given twice". Check the separators after
+every merge. A mutant that cannot be killed is equivalent: remove it and say
+why in the commit body.
+
 ## Regressions
 
 Every bug gets a test named after its ticket, written before the fix:

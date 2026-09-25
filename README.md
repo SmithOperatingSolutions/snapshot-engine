@@ -16,7 +16,11 @@ repository each, and import only this module's `engine` package.
 the merge library they share are done, and so is the engine API: sessions,
 transactions with snapshot isolation and optimistic commit through the
 models' merge, per-table grants and protected branches, errors scrubbed to
-a correlation id. The layers, scope and order are in
+a correlation id. Transactions refuse an item two of them wrote (no lost
+updates), commits to a branch are published in groups, and `Database.Collect`
+runs the core's garbage collection. What it sustains under load is in
+[`docs/PERFORMANCE.md`](docs/PERFORMANCE.md). Open work and decisions are
+GitHub issues. The layers, scope and order are in
 [`docs/specs/engine-layers.md`](docs/specs/engine-layers.md); the milestones
 and every checklist item with its test in [`docs/PROGRESS.md`](docs/PROGRESS.md).
 
@@ -30,6 +34,7 @@ model/document    schemaless records merged by field path; Mongo                
 engine/           Database, Session, Txn: the API adapters and programs use           (L5)
 e2e/              a repository driven through engine/ alone
 tools/mutate/     the checked-in mutant catalog (run by the core's tool)
+tools/bench/      the load tool: workloads W1 to W8, disk or memory, lost-update checks
 docs/             the layers spec, the Engine Spec, design, progress, the testing standard
 ```
 
@@ -60,6 +65,8 @@ Pure Go, `CGO_ENABLED=0`, here and in every adapter.
 - [`docs/specs/engine-spec.md`](docs/specs/engine-spec.md): the Engine Spec; its L4 is built here, its L0 to L3 are the core's
 - [`docs/DESIGN.md`](docs/DESIGN.md): decisions, the layer table the build enforces, formats as they land
 - [`docs/PROGRESS.md`](docs/PROGRESS.md): milestones, checklists and their tests, what testing found
+- [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md): the load tool, the baseline, and every performance change with its figures
+- [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md): how work is done here, for people and coding agents
 
 ## License
 
