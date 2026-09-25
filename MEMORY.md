@@ -7,6 +7,17 @@ something the next person would otherwise relearn, add it here, one fact per
 bullet, with the date and why. Put open questions and pending work in GitHub
 issues, not here.
 
+## Who owns what
+
+As of 2026-09-25 this repository belongs to the new engine team. The storage
+core's maintainers built it, handed it over, and now work on snapshot-core
+only:
+- Behaviour the engine needs from the core is an issue on snapshot-core.
+- The core's own open items are snapshot-core#29 to #33.
+
+The practices below are how the repository was run until the handover. The
+new team may keep or revise them, and should record any change here.
+
 ## How the owner works
 
 - **Surface every scope call, don't make it.** Nothing is deferred or cut
@@ -106,7 +117,8 @@ RAM, and an NVMe disk.
     It has seven commits plus an uncommitted engine change, none verified; #8
     describes it.
   - `../snapshot-engine-v020` holds branch `core-v0.2.0`, the move to core
-    v0.2.0 (#7).
+    v0.2.0 (#7). It was stopped part-way, with uncommitted doc edits and no
+    gates run; #7 lists what is done and what is not.
   
   Every other branch is already in main, and branches are kept after merging.
 - **Memory caps.** `systemd-run --user --scope` works here and is how heavy
