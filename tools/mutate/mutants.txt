@@ -1008,37 +1008,37 @@ pkg: ./engine
 run: ^TestRollbackLeavesTheWorkingSetUntouched$
 
 id: engine-txn-no-commit-into-a-merge
-file: engine/txn.go
-find: \t\tif cur.Merge != nil {\n\t\t\treturn ErrMergeInProgress\n\t\t}
-replace: \t\tif false {\n\t\t\treturn ErrMergeInProgress\n\t\t}
+file: engine/queue.go
+find: \tif cur.Merge != nil {\n\t\tfailAll(ErrMergeInProgress)
+replace: \tif false {\n\t\tfailAll(ErrMergeInProgress)
 pkg: ./engine
 run: ^TestABranchMidMergeTakesNoTransaction$
 
 id: engine-txn-a-moved-working-set-is-merged
 file: engine/txn.go
-find: \t\tif cur.Working == t.ws.Working {\n\t\t\tnext.Working = ours.Root()
-replace: \t\tif true {\n\t\t\tnext.Working = ours.Root()
+find: \tif cur.Root() == t.base.Root() {\n\t\treturn ours, nil
+replace: \tif true {\n\t\treturn ours, nil
 pkg: ./engine
 run: ^TestTwoTransactionsOnDifferentRowsBothCommit$
 
 id: engine-txn-a-collision-serializes
 file: engine/txn.go
-find: \t\t\tif len(res.Conflicts) > 0 {\n\t\t\t\treturn ErrSerialization\n\t\t\t}
-replace: \t\t\tif false {\n\t\t\t\treturn ErrSerialization\n\t\t\t}
+find: \tif len(res.Conflicts) > 0 {\n\t\treturn nil, ErrSerialization
+replace: \tif false {\n\t\treturn nil, ErrSerialization
 pkg: ./engine
 run: ^TestWhatTheMergeRefusesStillSerializes$
 
 id: engine-txn-a-lost-swap-is-tried-again
-file: engine/txn.go
-find: \t\tif !errors.Is(err, vcs.ErrConflict) {\n\t\t\treturn translate(err)
-replace: \t\tif true {\n\t\t\treturn translate(err)
+file: engine/queue.go
+find: \tif errors.Is(err, vcs.ErrConflict) {\n\t\treturn true\n\t}
+replace: \tif errors.Is(err, vcs.ErrConflict) && false {\n\t\treturn true\n\t}
 pkg: ./engine
 run: ^TestACommitThatLosesTheSwapTriesAgain$
 
 id: engine-txn-staged-follows-working
-file: engine/txn.go
-find: \t\tnext.Staged = next.Working // the engine keeps no staging area
-replace: \t\t_ = next.Staged // the engine keeps no staging area
+file: engine/queue.go
+find: \tnext.Working, next.Staged = w.Root(), w.Root() // the engine keeps no staging area
+replace: \tnext.Working = w.Root() // the engine keeps no staging area
 pkg: ./engine
 run: ^TestABranchMidMergeTakesNoTransaction$
 
@@ -1650,9 +1650,9 @@ pkg: ./engine
 run: ^TestABackendFailingAReadFailsTheCall$
 
 id: engine-txn-faults-commit-surfaces-an-unreadable-merge
-file: engine/txn.go
-find: theirs, err := r.Namespace(ctx, cur.Working)\n\t\t\tif err != nil {
-replace: theirs, err := r.Namespace(ctx, cur.Working)\n\t\t\tif err != nil && false {
+file: engine/queue.go
+find: \tw, err := d.r.Namespace(ctx, cur.Working)\n\tif err != nil {
+replace: \tw, err := d.r.Namespace(ctx, cur.Working)\n\tif err != nil && false {
 pkg: ./engine
 run: ^TestABackendFailingACommitWritesNothing$
 
