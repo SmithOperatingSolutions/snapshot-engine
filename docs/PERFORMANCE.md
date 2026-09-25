@@ -62,7 +62,8 @@ validation ("Validation", after that).
    `TestWhatTheMergeRefusesStillSerializes`.
 
 2. **Write throughput falls as sessions are added, and transactions
-   starve.** Read-modify-write on uniform keys over a million rows (W3),
+   starve. Fixed by group commit ("Group commit (#1)" below): 1.7 to
+   138 tx/s at 64 sessions on disk, no transaction gives up.** Read-modify-write on uniform keys over a million rows (W3),
    where two transactions almost never touch the same row:
 
    | Sessions | Disk tx/s | Disk p99 | Memory tx/s | Memory p99 |
@@ -80,7 +81,8 @@ validation ("Validation", after that).
    losing committer's pack before it checks the root, and the losers queue
    on the same lock as the winner.
 
-3. **A session commit can wait minutes.** In W8 on disk a `Session.Commit`
+3. **A session commit can wait minutes. Fixed by group commit: W8's
+   session commit p99 is 419 ms on disk.** In W8 on disk a `Session.Commit`
    every 5 s landed 7 times in 5.5 minutes, the first after about four
    minutes, p99 249 s (memory: p99 34 s). A version-control commit swaps
    the same root as every transaction, and the core retries a lost swap up
@@ -311,6 +313,87 @@ still collapses: 1.0 tx/s on disk and 1.7 in memory at 64 sessions, with
 42 and 14 transactions giving up after 50 retries. That is the root swap,
 which the ranked changes address.
 
+## Group commit (#1)
+
+DESIGN D20: commits to a branch of one database take turns in its queue,
+and the transactions waiting are published with one root swap, each
+checked against its own snapshot. Full scale, W3 and W8 only
+(`-only W3,W8`), 30 s a W3 phase and W8's 5 minutes, each run under the
+shared measurement lock, started once the load average was under 2 with
+no test or bench process running. Other agents' test runs shared the
+machine during some runs; the load average during each (sampled every
+30 s) is given. "Before" is main's engine (47e7817) with the bench's
+swap counter added (f00b85f); "after" is this branch as it ends
+(8737891); both on core v0.1.1. "Next core" is the same engine built
+under an uncommitted `go.work` against snapshot-core's unreleased
+`core-next` branch (53bcbde, the v0.1.2 batch: a loser learns before it
+uploads, backoff between lost swaps, among others).
+
+W3 read-modify-write on uniform keys over a million rows, disk:
+
+| Sessions | Before tx/s | p99 | swaps/tx | After tx/s | p99 | swaps/tx | Next core tx/s | p99 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 26.6 | 50 ms | 1.000 | 26.4 | 48 ms | 1.000 | 28.2 | 57 ms |
+| 4 | 12.2 | 9.7 s | 1.000 | 45.3 | 109 ms | 0.500 | 49.4 | 109 ms |
+| 16 | 4.1 | 31 s | 1.000 | 115.0 | 159 ms | 0.125 | 122.8 | 168 ms |
+| 64 | 1.7 | 56 s | 1.000 | 137.8 | 487 ms | 0.031 | 143.2 | 487 ms |
+
+Memory:
+
+| Sessions | Before tx/s | p99 | swaps/tx | After tx/s | p99 | swaps/tx | Next core tx/s | p99 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 213.1 | 9.4 ms | 1.000 | 214.3 | 8.9 ms | 1.000 | 922.0 | 2.2 ms |
+| 4 | 103.6 | 570 ms | 1.000 | 167.9 | 36 ms | 0.500 | 452.6 | 15 ms |
+| 16 | 31.0 | 4.6 s | 1.000 | 244.1 | 76 ms | 0.125 | 295.2 | 76 ms |
+| 64 | 3.1 | 43 s | 1.000 | 168.0 | 436 ms | 0.031 | 184.9 | 403 ms |
+
+Zipf 1.1 keys, tx/s at 1, 4, 16 and 64 sessions: disk before 22.3, 11.4,
+3.8, 1.6; after 26.0, 40.3, 104.3, 156.5; next core 29.3, 48.2, 108.3,
+185.1. Memory before 89.4, 42.2, 11.1, 2.5; after 122.5, 130.6, 196.5,
+202.1; next core 897.1, 509.6, 368.8, 285.2. Before, every uniform-key
+failure was a lost swap (768 at 64 sessions on disk) and three
+transactions gave up on disk; after, no uniform-key transaction failed at all,
+and on Zipf keys every failure is a real collision of two writers on one
+row under the item rule (2,823 at 64 sessions on disk), each retried and
+committed. No lost update in any phase.
+
+W8, the sustained mix, 64 sessions for 5 minutes:
+
+| | Disk before | Disk after | Disk next core | Memory before | Memory after |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| tx/s | 1.2 | 237.0 | 272.1 | 1.8 | 260.1 |
+| p99 | 51.5 s | 419 ms | 352 ms | 163 s | 386 ms |
+| gave up (50 attempts) | 63 | 0 | 0 | 21 | 0 |
+| serialization failures | 3,632 | 2 | 5 | 5,510 | 5 |
+| root swaps per transaction | 0.80 | 0.025 | 0.025 | 0.87 | 0.026 |
+| session commits (every 5 s) | 7 | 60 | 60 | 39 | 60 |
+| session commit p99 | 292 s | 419 ms | 369 ms | 34 s | 319 ms |
+
+(Swaps per transaction counts W4's read-only GETs, which roll back and
+swap nothing, as transactions: 0.8 before is every writer swapping
+alone.) Memory on the next core ran 3 minutes at 310 to 335 tx/s, then the
+run's 12 GiB memory cap stopped it: the memory backend's store is the heap,
+and at that rate it passed 11.8 GiB. Load average during the runs, median
+(max): disk before 4.95 (8.63), after 2.39 (3.35), next core 2.54 (4.16);
+memory before 2.48 (3.26), after 1.80 (2.43), next core 1.46 (1.88).
+
+**Where the time goes now.** A batch's cost is its leader's: one swap
+(two rounds of fsync on disk, about 31 ms) and, per member, the item rule
+and the merge, both reading the difference between the member's snapshot
+and the batch's working set. That difference grows with what landed
+since the snapshot, so a member's check costs more the more sessions
+there are: at 64 sessions a batch carries about 30 transactions and takes
+about 0.4 s, nearly all of it reading prolly nodes and hashing each chunk
+read (the spec's verify-on-every-read; ranked change 7). The first queue
+also merged each member as base, ours, the batch, so the table model
+rewrote the member with every earlier member's rows: W3 at 64 sessions
+ran at 41 tx/s in memory, below 16 sessions' 146. Taking the batch as the
+merge's first side (the item rule leaves the sides disjoint, so the
+result is the same) made it 163 and 265 (`8737891`'s figures). The next
+core lifts one session fourfold in memory (a pending pack sized to what
+it holds, ranked change 3) and adds about 5% on disk; above one session
+the leader's reading, not the swap, is the ceiling.
+
 ## Where the time goes
 
 **W1 bulk load.** One goroutine does everything, CPU-bound (82% of a core on
@@ -406,7 +489,7 @@ lands as a `refactor:` with the bench's before and after figures.
 
 | # | Change | Where | Estimated effect |
 | ---: | --- | --- | --- |
-| 1 | **Commit transactions through a per-branch queue in the engine: group commit.** A committer that finds others waiting merges their transactions onto the working set one after another, in memory, and publishes once for the group; each transaction still succeeds or fails alone. Lost swaps between this process's own transactions disappear; the optimistic swap stays for other processes. Session commits go through the same queue | engine (`engine/txn.go`, `Session.Commit`, `Session.Merge`) | Disk at 64 sessions from 1.7 tx/s to roughly 200 to 500 (one 31 ms publish for a group, plus 1 to 4.5 ms of merge per transaction); at 16 from 4.1 to 150 to 300; no more lost-swap failures or give-ups in one process; session commits wait one group, not minutes |
+| 1 | **Done (DESIGN D20; "Group commit" above).** **Commit transactions through a per-branch queue in the engine: group commit.** A committer that finds others waiting merges their transactions onto the working set one after another, in memory, and publishes once for the group; each transaction still succeeds or fails alone. Lost swaps between this process's own transactions disappear; the optimistic swap stays for other processes. Session commits go through the same queue | engine (`engine/txn.go`, `Session.Commit`, `Session.Merge`) | Disk at 64 sessions from 1.7 tx/s to roughly 200 to 500 (one 31 ms publish for a group, plus 1 to 4.5 ms of merge per transaction); at 16 from 4.1 to 150 to 300; no more lost-swap failures or give-ups in one process; session commits wait one group, not minutes |
 | 2 | **Stop re-reading the manifest on every root read.** Compare the stored root's version with the one in hand before decrypting and decoding; the store's own swaps already update it | core (`core/chunk/packstore`: `Root`, `refresh`) | Removes the growth in item 4 of the list above: `Begin` and commit stop slowing with age. 28 to 70% of CPU under contention (W3, W5, W8), 39% in W3 on memory |
 | 3 | **Size the pending pack to what it holds.** `newWriter` asks `pack.NewWriter` for the full 32 MiB pack size as its starting buffer; `NewWriterSized` with a small expectation grows only as needed | core (`core/chunk/packstore`) | A one-row commit on memory from about 3 ms to well under 1 ms (a commit that publishes nothing takes 0.1 ms); 3 ms of 31 ms on disk; 430 of 594 GB allocated in W3; 14 to 22% of CPU under contention, and GC load |
 | 4 | **Check the root before uploading, and back off between lost swaps.** `CompareAndSetRoot` can refuse a stale expected root before it finishes and uploads the pending pack; `vcs.update` retries 1,000 times without waiting | core (`core/chunk/packstore`, `core/vcs`) | Without #1, N sessions get about one session's throughput (26 tx/s on disk) instead of collapsing; with it, it protects writers in other processes; ends the four-minute session commit |
