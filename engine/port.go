@@ -40,6 +40,11 @@ type Authorizer = auth.Authorizer
 // Blobs is the backend a database lives on (the core's port).
 type Blobs = blob.BlobStore
 
+// BlobVersion is a version of a backend's root, as Blobs.SwapRoot takes
+// and returns it: named here so a program can wrap Blobs (to count or
+// meter what reaches its backend) without importing the core.
+type BlobVersion = blob.Version
+
 // Keyring holds a database's master key (the core's).
 type Keyring = seal.Keyring
 
