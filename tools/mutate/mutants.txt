@@ -2334,3 +2334,10 @@ find: openMap(ctx, s, indexConfig(cfg), r.indexes[i])
 replace: openMap(ctx, s, cfg, r.indexes[i])
 pkg: ./model/table
 run: ^TestRegression_SE7_ATableReadsNoRowLongerThanItsSchemaHolds$
+
+id: table-a-key-only-row-is-limited-to-a-byte
+file: model/table/store.go
+find: cfg.MaxValue = max(n, 1)
+replace: cfg.MaxValue = n
+pkg: ./model/table
+run: ^TestRegression_SE7_AKeyOnlyTableReadsNoRowValue$

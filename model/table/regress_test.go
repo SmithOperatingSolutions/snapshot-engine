@@ -386,3 +386,51 @@ func TestRegression_SE7_ATableReadsNoRowLongerThanItsSchemaHolds(t *testing.T) {
 		}
 	}
 }
+
+// A table whose columns are all its key stores an empty row record, and
+// its limit is one byte, not the core's default that a limit of 0 means:
+// a forged stream there is refused unread too (snapshot-engine#7).
+func TestRegression_SE7_AKeyOnlyTableReadsNoRowValue(t *testing.T) {
+	s := memstore.New()
+	id := table.Column{Tag: 1, Name: "id", Type: table.TypeInt8}
+	tb, err := table.Create(ctx, s, cfg(), table.Schema{Columns: []table.Column{id}, PrimaryKey: []table.Tag{1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := tb.Edit()
+	if _, err := e.Insert(table.Row{1: int64(1)}); err != nil {
+		t.Fatal(err)
+	}
+	if tb, err = e.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	kb, err := table.EncodeCell(id, int64(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.Get(ctx, tb.Root().Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, primary, _, _, err := table.DecodeRoot(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged := forgedTable(t, s, tb.Root(), true, withValue(t, s, primary, kb, bytes.Repeat([]byte{0x01}, cfg().InlineLimit+1)))
+	get := func(r model.Root) (table.Row, bool, error) {
+		tb, err := table.Open(ctx, s, cfg(), r)
+		if err != nil {
+			return nil, false, err
+		}
+		return tb.Get(ctx, table.Key{int64(1)})
+	}
+	if row, ok, err := get(tb.Root()); err != nil || !ok || row[1] != int64(1) {
+		t.Fatalf("positive control: the key-only row read back as %v, %v, %v", row, ok, err)
+	}
+	var gerr error
+	used := allocated(func() { _, _, gerr = get(forged) })
+	if !errors.Is(gerr, prolly.ErrValueTooLarge) || used > 64<<10 {
+		t.Errorf("reading a key-only table whose row value is a %d-byte stream allocated %d bytes and returned %v; want prolly.ErrValueTooLarge within 64 KiB: a forged stream is read before it is refused",
+			cfg().InlineLimit+1, used, gerr)
+	}
+}
