@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -44,6 +43,11 @@ const (
 	MaxCellLen     = 1 << 20 // the longest encoded cell; a row past the map's inline limit is a stream
 	MaxNumericLen  = 1000    // digits in a numeric's text
 	maxNumericDigs = 1000
+	// maxExponent bounds a numeric's written exponent, six digits as the
+	// document model's: far past the exponent any numeric of MaxNumericLen
+	// bytes of text can need (about 2,000), and small enough that the
+	// arithmetic on it cannot overflow (snapshot-engine#3).
+	maxExponent = 999999
 )
 
 // ErrValue is a value that does not fit its column.
@@ -273,11 +277,16 @@ const (
 )
 
 // ParseNumeric reads a decimal in any of its spellings ("1.50", "-0", "01",
-// "2e3") into its canonical text. Anything else is ErrValue.
+// "2e3") into its canonical text. Anything else is ErrValue, and so is a
+// value whose canonical text would pass MaxNumericLen, refused from its
+// length before the text is built.
 func ParseNumeric(s string) (Numeric, error) {
 	neg, digits, exp, err := parseDecimal(s)
 	if err != nil {
 		return "", err
+	}
+	if n := canonicalLen(neg, len(digits), exp); len(digits) > 0 && n > MaxNumericLen {
+		return "", fmt.Errorf("%w: a numeric of %d bytes of text, over %d", ErrValue, n, MaxNumericLen)
 	}
 	return canonical(neg, digits, exp), nil
 }
@@ -306,8 +315,8 @@ func parseDecimal(s string) (neg bool, digits []byte, exp int, err error) {
 		case c == '.' && point < 0:
 			point = len(mant)
 		case (c == 'e' || c == 'E') && sawDigit:
-			e, err := strconv.Atoi(s[i+1:])
-			if err != nil || len(s[i+1:]) == 0 || s[i+1] == '+' {
+			e, ok := parseExponent(s[i+1:])
+			if !ok {
 				return false, nil, 0, fmt.Errorf("%w: a numeric's exponent %q", ErrValue, s[i+1:])
 			}
 			exp = e
@@ -339,6 +348,32 @@ func parseDecimal(s string) (neg bool, digits []byte, exp int, err error) {
 		return false, nil, 0, fmt.Errorf("%w: a numeric of %d digits", ErrValue, len(digits))
 	}
 	return neg, digits, exp, nil
+}
+
+// parseExponent reads a written exponent: an optional '-' then decimal
+// digits, whose value is at most maxExponent. It stops at the first digit
+// past the bound, so no spelling of an exponent costs more than its bytes.
+func parseExponent(s string) (int, bool) {
+	neg := len(s) > 0 && s[0] == '-'
+	if neg {
+		s = s[1:]
+	}
+	if len(s) == 0 {
+		return 0, false
+	}
+	e := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, false
+		}
+		if e = e*10 + int(s[i]-'0'); e > maxExponent {
+			return 0, false
+		}
+	}
+	if neg {
+		e = -e
+	}
+	return e, true
 }
 
 // canonicalLen is the length of canonical's text for a nonzero value of n
@@ -407,7 +442,7 @@ func encodeNumeric(b []byte, n Numeric) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if canonical(neg, digits, exp) != n {
+	if (len(digits) > 0 && canonicalLen(neg, len(digits), exp) != len(n)) || canonical(neg, digits, exp) != n {
 		return nil, fmt.Errorf("%w: a numeric %q is not canonical", ErrValue, string(n))
 	}
 	if len(digits) == 0 {

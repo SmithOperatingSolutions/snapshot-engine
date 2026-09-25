@@ -1926,3 +1926,26 @@ find: ErrPermissionDenied, ErrSessionLost, ErrSerialization
 replace: ErrPermissionDenied, ErrSerialization
 pkg: ./engine
 run: ^TestAWriteACollectionReclaimedLosesTheSession$
+
+# input bounds: a written numeric (#3)
+
+id: table-a-numeric-exponent-is-bounded
+file: model/table/cell.go
+find: if e = e*10 + int(s[i]-'0'); e > maxExponent {
+replace: if e = e*10 + int(s[i]-'0'); false {
+pkg: ./model/table
+run: ^TestRegression_SE3_AWrittenNumericCannotAskForUnboundedText$
+
+id: table-parse-numeric-refuses-text-past-the-limit
+file: model/table/cell.go
+find: if n := canonicalLen(neg, len(digits), exp); len(digits) > 0 && n > MaxNumericLen {
+replace: if n := canonicalLen(neg, len(digits), exp); len(digits) > 0 && false {
+pkg: ./model/table
+run: ^TestRegression_SE3_AWrittenNumericCannotAskForUnboundedText$
+
+id: table-encode-numeric-measures-before-building
+file: model/table/cell.go
+find: if (len(digits) > 0 && canonicalLen(neg, len(digits), exp) != len(n)) || canonical(neg, digits, exp) != n {
+replace: if canonical(neg, digits, exp) != n {
+pkg: ./model/table
+run: ^TestRegression_SE3_AWrittenNumericCannotAskForUnboundedText$
