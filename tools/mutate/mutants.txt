@@ -2386,6 +2386,7 @@ replace: for i, root := range []model.Root{c.From.Root, c.From.Root} {
 pkg: ./engine
 run: ^TestACounterSetOrDeletedWhileIncrementedStillSerializes$
 
+# engine commit queue: the panic recovery and the batch deadline (#8 backfills)
 id: engine-queue-a-panicking-publish-answers-every-member
 file: engine/queue.go
 find: \t\t\t\t\tc.finish(fmt.Errorf("%w: a commit's leader panicked", ErrInternal))
@@ -2435,6 +2436,7 @@ replace: \tctx := batch[0].ctx
 pkg: ./engine
 run: ^TestABatchRunsUntilItsLatestMembersDeadline$
 
+# engine rebase (#8)
 id: engine-txn-rebase-takes-only-objects-modified-on-both-sides
 file: engine/txn.go
 find: \t\tif c.From.Model != c.To.Model || rb == nil {\n\t\t\treturn nil, false, nil
