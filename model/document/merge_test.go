@@ -1,6 +1,7 @@
 package document_test
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"strings"
@@ -258,4 +259,28 @@ func TestLocationsRoundTripAndForgeriesAreRefused(t *testing.T) {
 			t.Errorf("%s: a location Locate did not write was read", name)
 		}
 	}
+}
+
+// FuzzParseLocation reads locations: what parses names an id a collection
+// can hold and a path no deeper than a document, and Locate writes it back
+// as the same bytes, so a location has one spelling.
+func FuzzParseLocation(f *testing.F) {
+	for _, loc := range [][]byte{document.Locate([]byte("u1"), merge.Path{"address", "city"}), document.Locate([]byte("u1"), nil), {}, {0}, {5, 'u'}, {0x82, 0x00, 'u', '1'}, document.Locate([]byte("u1"), make(merge.Path, document.MaxDepth+1))} {
+		f.Add(loc)
+	}
+	f.Fuzz(func(t *testing.T, loc []byte) {
+		id, path, err := document.ParseLocation(loc)
+		if err != nil {
+			if !errors.Is(err, document.ErrID) {
+				t.Fatalf("ParseLocation(%x): %v, want ErrID", loc, err)
+			}
+			return
+		}
+		if len(id) == 0 || len(id) > document.MaxIDSize || len(path) > document.MaxDepth {
+			t.Fatalf("ParseLocation(%x) names an id of %d bytes and a path %d deep, which no collection holds", loc, len(id), len(path))
+		}
+		if back := document.Locate(id, path); !bytes.Equal(back, loc) {
+			t.Fatalf("ParseLocation(%x) = %q, %q, which Locate writes as %x: one place, two spellings", loc, id, path, back)
+		}
+	})
 }

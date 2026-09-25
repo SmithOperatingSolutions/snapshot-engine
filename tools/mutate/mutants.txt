@@ -2106,3 +2106,10 @@ find: if _, _, ok := t.schema.column(tag); !ok {
 replace: if _, _, ok := t.schema.column(tag); !ok && false {
 pkg: ./model/table
 run: ^FuzzParseLocation$
+
+id: document-a-location-is-no-deeper-than-a-document
+file: model/document/document.go
+find: if len(path) == MaxDepth {
+replace: if len(path) == MaxDepth && false {
+pkg: ./model/document
+run: ^FuzzParseLocation$
