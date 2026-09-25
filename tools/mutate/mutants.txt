@@ -902,6 +902,13 @@ replace: \t\thit = false
 pkg: ./engine
 run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
 
+id: engine-txn-different-items-do-not-conflict
+file: engine/txn.go
+find: \t\thit = written[item]
+replace: \t\thit = true
+pkg: ./engine
+run: ^TestTransactionsWritingDifferentItemsAllCommit$
+
 id: engine-txn-a-branch-mid-merge-takes-no-transaction
 file: engine/txn.go
 find: \tif ws.Merge != nil {\n\t\treturn nil, ErrMergeInProgress\n\t}

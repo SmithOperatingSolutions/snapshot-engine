@@ -157,6 +157,63 @@ func TestTransactionsWritingOneItemSerializeWhateverTheyWrote(t *testing.T) {
 	}
 }
 
+// E4, the positive control: transactions from one snapshot writing
+// different items, a row each, a kv key each, a record each, all commit and
+// all their writes land.
+func TestTransactionsWritingDifferentItemsAllCommit(t *testing.T) {
+	db, s := kindsDB(t)
+	setup := txnBegin(t, s)
+	if err := kindsCollection(t, setup, "users").PutJSON(ctx, []byte("u2"), []byte(`{"name": "bob", "age": 40}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := setup.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	txs := make([]*engine.Txn, 6)
+	for i := range txs {
+		txs[i] = txnBegin(t, txnSession(t, db, "main"))
+	}
+	if err := txnTable(t, txs[0], "people").Update(ctx, engine.Key{int64(1)}, txnPerson(1, "ann", 36)); err != nil {
+		t.Fatal(err)
+	}
+	if err := txnTable(t, txs[1], "people").Update(ctx, engine.Key{int64(2)}, txnPerson(2, "ben", 40)); err != nil {
+		t.Fatal(err)
+	}
+	if err := kindsKV(t, txs[2], "cache").Set(ctx, []byte("a"), kindsBytes("A")); err != nil {
+		t.Fatal(err)
+	}
+	if err := kindsKV(t, txs[3], "cache").Set(ctx, []byte("hits"), kindsCounter(11)); err != nil {
+		t.Fatal(err)
+	}
+	if err := kindsCollection(t, txs[4], "users").PutJSON(ctx, []byte("u1"), []byte(`{"name": "ada", "age": 37}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := kindsCollection(t, txs[5], "users").PutJSON(ctx, []byte("u2"), []byte(`{"name": "bob", "age": 41}`)); err != nil {
+		t.Fatal(err)
+	}
+	for i, tx := range txs {
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatalf("transaction %d, on an item no other transaction wrote = %v, want it to commit", i, err)
+		}
+	}
+	for id, want := range map[int64]string{1: "ann", 2: "ben"} {
+		if got, _ := txnName(t, s, id); got != want {
+			t.Errorf("row %d is %q, want %q", id, got, want)
+		}
+	}
+	if v, _ := kindsGet(t, s, "a"); string(v.Bytes) != "A" {
+		t.Errorf("a is %q, want A", v.Bytes)
+	}
+	if msg := counterIs(t, s, 11); msg != "" {
+		t.Error(msg)
+	}
+	for id, want := range map[string]string{"u1": `{"age":37,"name":"ada"}`, "u2": `{"age":41,"name":"bob"}`} {
+		if got := kindsRecord(t, s, id); got != want {
+			t.Errorf("%s is %s, want %s", id, got, want)
+		}
+	}
+}
+
 // ageIs says how row 1's age differs from want ("" when it does not).
 func ageIs(t *testing.T, s *engine.Session, want int64) string {
 	t.Helper()
