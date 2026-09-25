@@ -104,7 +104,8 @@ func recordAge(by int) itemWrite {
 // ErrSerialization and writes nothing, and the item holds the first's
 // write alone. The same write on both sides is two writes, one of which an
 // application would lose: an increment of a row's age, of a kv value, of a
-// counter, of a record's field.
+// record's field. A counter is the exception: its increments sum (DESIGN
+// D18, #7; counters_test.go).
 func TestTransactionsWritingOneItemSerializeWhateverTheyWrote(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
@@ -125,9 +126,6 @@ func TestTransactionsWritingOneItemSerializeWhateverTheyWrote(t *testing.T) {
 				return "a is " + string(v.Bytes) + ", want 2"
 			}
 			return ""
-		}},
-		{"a counter, the same increment on both sides", counterBy(1), counterBy(1), func(t *testing.T, s *engine.Session) string {
-			return counterIs(t, s, 11)
 		}},
 		{"a record, one field changed the same way on both sides", recordAge(1), recordAge(1), func(t *testing.T, s *engine.Session) string {
 			if got := kindsRecord(t, s, "u1"); got != `{"age":37,"name":"ada"}` {

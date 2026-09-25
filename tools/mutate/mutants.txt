@@ -2350,3 +2350,24 @@ find: func (Model) Accumulates() bool { return true }
 replace: func (Model) Accumulates() bool { return false }
 pkg: ./engine
 run: ^TestACounterIncrementedOnTwoBranchesMergesToTheSum$
+
+id: engine-counters-leave-the-item-rule
+file: engine/txn.go
+find: \t\tif counter {\n\t\t\tdelete(written, key)
+replace: \t\tif false {\n\t\t\tdelete(written, key)
+pkg: ./engine
+run: ^TestConcurrentIncrementsOfOneCounterBothCommit$
+
+id: engine-counters-are-a-kv-objects-keys
+file: engine/txn.go
+find: if m.To.Model == kv.ID {\n\t\t\tif err := t.counterDeltas
+replace: if false {\n\t\t\tif err := t.counterDeltas
+pkg: ./engine
+run: ^TestConcurrentIncrementsOfOneCounterBothCommit$
+
+id: engine-only-counters-leave-the-item-rule
+file: engine/txn.go
+find: counter = counter && ok && v.Kind == kv.Counter
+replace: counter = counter && ok && v.Kind == v.Kind
+pkg: ./engine
+run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$

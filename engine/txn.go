@@ -424,6 +424,11 @@ func (t *Txn) writeWrite(ctx context.Context, ours, theirs *object.Namespace) er
 		if err != nil {
 			return err
 		}
+		if m.To.Model == kv.ID {
+			if err := t.counterDeltas(ctx, m, written); err != nil {
+				return err
+			}
+		}
 		hit := whole
 		if !hit {
 			if hit, err = anyItem(ctx, td, c, written); err != nil {
@@ -445,6 +450,37 @@ func items(ctx context.Context, d *object.DiffIter, c object.Change) (written ma
 		return true
 	})
 	return written, whole, err
+}
+
+// counterDeltas takes out of written the keys a kv object's change c
+// wrote from a counter to a counter: an INCR or DECR, whose delta the kv
+// model adds to whatever landed since (DESIGN D18), not an item the rule
+// refuses. A key that was or became another kind, or was added or
+// deleted, stays an item; and a counter written here that the other side
+// set to another kind or deleted is the merge's conflict.
+func (t *Txn) counterDeltas(ctx context.Context, c object.Change, written map[string]bool) error {
+	var maps [2]*kv.Map
+	for i, root := range []model.Root{c.From.Root, c.To.Root} {
+		m, err := kv.Open(ctx, t.s.db.r.Chunks(), t.s.db.models.kv.Config, root)
+		if err != nil {
+			return kvErr(err)
+		}
+		maps[i] = m
+	}
+	for key := range written {
+		counter := true
+		for _, m := range maps {
+			v, ok, err := m.Get(ctx, []byte(key))
+			if err != nil {
+				return kvErr(err)
+			}
+			counter = counter && ok && v.Kind == kv.Counter
+		}
+		if counter {
+			delete(written, key)
+		}
+	}
+	return nil
 }
 
 // anyItem reports whether a modified object's change wrote any of written,
