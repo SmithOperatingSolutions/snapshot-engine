@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 	"strings"
@@ -33,6 +34,12 @@ import (
 type swapCounter struct {
 	engine.Blobs
 	swaps atomic.Int64
+	bytes atomic.Int64 // of every object put: what the publishes wrote
+}
+
+func (b *swapCounter) Put(ctx context.Context, name string, r io.Reader, size int64) error {
+	b.bytes.Add(size)
+	return b.Blobs.Put(ctx, name, r, size)
 }
 
 func (b *swapCounter) SwapRoot(ctx context.Context, expected engine.BlobVersion, next []byte) (engine.BlobVersion, error) {
