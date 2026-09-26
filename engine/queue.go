@@ -277,11 +277,8 @@ func (d *Database) attempt(ctx context.Context, q *branchQueue, branch string, b
 	applied := 0
 	r := d.newRun(branch, g, w)
 	closeRun := func() {
-		next, err := r.close(ctx)
-		if err != nil {
-			for _, i := range r.members {
-				errs[i] = err
-			}
+		next, ok := r.close(ctx, errs)
+		if !ok {
 			return
 		}
 		applied += len(r.members)

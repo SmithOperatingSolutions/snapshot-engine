@@ -177,12 +177,25 @@ func (r *run) take(ctx context.Context, i int, c *queued) error {
 }
 
 // close writes every object the run touched once and is the working set
-// the run made; a store fault is every taken member's.
-func (r *run) close(ctx context.Context) (*object.Namespace, error) {
+// the run made, or, when a flush meets a store fault, gives every member
+// the run took that error and reports false: none of them published, and
+// none may learn otherwise.
+func (r *run) close(ctx context.Context, errs []error) (*object.Namespace, bool) {
 	if len(r.members) == 0 {
-		return r.w, nil
+		return r.w, true
 	}
-	e := r.w.Editor()
+	ns, err := r.flush(ctx)
+	if err != nil {
+		for _, i := range r.members {
+			errs[i] = err
+		}
+		return nil, false
+	}
+	return ns, true
+}
+
+// flush writes every object the run touched once and the namespace once.
+func (r *run) flush(ctx context.Context) (*object.Namespace, error) {
 	for path, b := range r.batches {
 		root, err := b.flush(ctx)
 		if err != nil {
@@ -190,6 +203,7 @@ func (r *run) close(ctx context.Context) (*object.Namespace, error) {
 		}
 		r.refs[path] = object.Ref{Model: r.refs[path].Model, Root: root}
 	}
+	e := r.w.Editor()
 	for path, ref := range r.refs {
 		if err := e.Put(path, ref); err != nil {
 			return nil, translate(err)
