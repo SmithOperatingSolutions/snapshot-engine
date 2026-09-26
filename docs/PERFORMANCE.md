@@ -744,3 +744,38 @@ table. What remains in the leader is that flush and its hashing, and on
 disk the publish. The core's node cache (snapshot-core#32, item 7) and
 storing a host's nodes raw (snapshot-core#45) both cut what the flush
 costs.
+
+## Read your writes (#9)
+
+DESIGN D13: a handle answers a read from its pending edits laid over the
+snapshot, and flushes them once, when the commit makes the transaction's
+namespace, instead of flushing them into new chunks before every read.
+W6 at full scale on both backends, one run per lock on a quiet machine,
+nothing else run during them; "before" is `batch-apply` as it ends
+(a62e701), "after" this branch. The transaction rows are one
+read-modify-write over n rows: each row read, its balance changed, the
+row written back.
+
+| W6 phase | Disk before | Disk after | Memory before | Memory after |
+| --- | ---: | ---: | ---: | ---: |
+| txn changing 100 rows, p50 | 71.3 ms | **31.5 ms** | 58.7 ms | **12.6 ms** |
+| txn changing 10,000 rows, p50 | 5.64 s | **839 ms** | 5.37 s | **671 ms** |
+| of which the commit, p50 | 61 ms | 352 ms | 8.9 ms | 285 ms |
+| session commit after a 1-row txn, p50 | 5.5 ms | 5.2 ms | 90 µs | 55 µs |
+| merge 100+100 changed rows | 19.9 ms | 28.3 ms | 8.4 ms | 8.4 ms |
+| merge 10,000+10,000 changed rows | 369 ms | 386 ms | 285 ms | 319 ms |
+| diff across the 10,000-row merge | 17.8 ms | 25.2 ms | 16.3 ms | 17.8 ms |
+
+**What changed.** A transaction changing 10,000 rows read-modify-write
+went from 5.64 s to 839 ms on disk and from 5.37 s to 671 ms in memory,
+6.7 and 8 times; 100 rows from 71 to 31 ms and from 59 to 13 ms. Before,
+each of the 10,000 reads flushed the row written before it into new
+chunks, a tree rewrite per row; after, the reads come from the pending
+rows and the tree is rewritten once, at the commit, which is why the
+commit's own share grew from 61 to 352 ms on disk: the work moved there
+and shrank. The merges and diffs of the same phase are one run each and
+within their noise. Every model's editor reads the object it would flush
+(`TestAnEditorReadsWhatItWouldFlush`, kv, document, table), and a
+transaction reading 200 rows, keys and records back after writing them
+publishes 2,509 bytes against 366,088 before
+(`TestATransactionReadsItsWritesWithoutFlushingThem`).
