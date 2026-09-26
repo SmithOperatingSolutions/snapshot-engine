@@ -30,6 +30,17 @@ func (b *readingBlobs) Get(ctx context.Context, name string, off, n int64) (io.R
 // counted.
 func movedReads(t *testing.T, moved int) int64 {
 	t.Helper()
+	reads, err := movedReadsOf(t, moved, false)
+	if err != nil {
+		t.Fatalf("a one-row commit onto a working set another process moved: %v", err)
+	}
+	return reads
+}
+
+// movedReadsOf is movedReads returning the commit's outcome; with collide
+// the other process changes the member's own row too.
+func movedReadsOf(t *testing.T, moved int, collide bool) (int64, error) {
+	t.Helper()
 	o := dbOptions(t)
 	writer, err := engine.Create(ctx, alice, o)
 	if err != nil {
@@ -76,15 +87,18 @@ func movedReads(t *testing.T, moved int) int64 {
 			t.Fatal(err)
 		}
 	}
+	if collide { // the row the member adds, added here too
+		if _, err := theirs.Insert(ctx, txnPerson(int64(moved), "theirs", 31)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := move.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
 
 	rb.gets.Store(0)
-	if err := tx.Commit(ctx); err != nil {
-		t.Fatalf("a one-row commit onto a working set another process moved: %v", err)
-	}
-	return rb.gets.Load()
+	err = tx.Commit(ctx)
+	return rb.gets.Load(), err
 }
 
 // A commit onto a working set that moved since the transaction's snapshot
