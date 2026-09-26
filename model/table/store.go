@@ -491,6 +491,24 @@ func (e *Editor) set(kb []byte, p *pendingRow) {
 	e.pending[string(kb)] = p
 }
 
+// Get reads the row with key as the table the editor would flush holds
+// it. Stub: the stored table.
+func (e *Editor) Get(ctx context.Context, key Key) (Row, bool, error) {
+	return e.t.Get(ctx, key)
+}
+
+// Scan walks the table the editor would flush in key order. Stub: the
+// stored table.
+func (e *Editor) Scan(ctx context.Context) (*Rows, error) {
+	return e.t.Scan(ctx)
+}
+
+// IndexLookup walks the rows of the table the editor would flush whose
+// index columns equal values. Stub: the stored table.
+func (e *Editor) IndexLookup(ctx context.Context, index Tag, values ...any) (*Rows, error) {
+	return e.t.IndexLookup(ctx, index, values...)
+}
+
 // Insert adds a row, refusing a value that does not fit its column
 // (ErrValue) and a key that exists (ErrDuplicate); it returns the row's key,
 // a fresh RowID for a table without a declared key.
