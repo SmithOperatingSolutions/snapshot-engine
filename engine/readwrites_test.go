@@ -19,9 +19,9 @@ func TestATransactionReadsItsWritesWithoutFlushingThem(t *testing.T) {
 		t.Helper()
 		tx := txnBegin(t, txnSession(t, db, "main"))
 		people := txnTable(t, tx, "people")
-		tag := "a" // the varchar(8) name column: a tag and a number
+		tag, ageOffset := "a", int64(1000) // a name that fits varchar(8), and ages of this variant's own
 		if readBack {
-			tag = "b"
+			tag, ageOffset = "b", 2000
 		}
 		cache, err := tx.CreateKV(ctx, fmt.Sprintf("cache-%t", readBack))
 		if err != nil {
@@ -33,7 +33,7 @@ func TestATransactionReadsItsWritesWithoutFlushingThem(t *testing.T) {
 		}
 		for i := range n {
 			id := int64(i + 1)
-			if err := people.Update(ctx, engine.Key{id}, txnPerson(id, tag+fmt.Sprint(i), id)); err != nil {
+			if err := people.Update(ctx, engine.Key{id}, txnPerson(id, tag+fmt.Sprint(i), id+ageOffset)); err != nil { // the age moves too: a lookup must find the row at its new age
 				t.Fatal(err)
 			}
 			if err := cache.Set(ctx, []byte(fmt.Sprintf("k%d", i)), kindsBytes(fmt.Sprintf("v%d", i))); err != nil {
@@ -53,6 +53,40 @@ func TestATransactionReadsItsWritesWithoutFlushingThem(t *testing.T) {
 			}
 			if _, ok, err := docs.Get(ctx, []byte(fmt.Sprintf("r%d", i))); err != nil || !ok {
 				t.Fatalf("record r%d read back = %t, %v", i, ok, err)
+			}
+		}
+		if readBack { // the walks see them too, in order, still with nothing flushed
+			var names, keys, ids []string
+			if err := people.Scan(ctx, func(_ engine.Key, row engine.Row) (bool, error) {
+				names = append(names, row[2].(string))
+				return true, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := cache.Scan(ctx, nil, func(k []byte, _ engine.Value) (bool, error) {
+				keys = append(keys, string(k))
+				return true, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := docs.Scan(ctx, nil, func(id []byte, _ engine.Node) (bool, error) {
+				ids = append(ids, string(id))
+				return true, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if len(names) != n || names[0] != tag+"0" || len(keys) != n || len(ids) != n {
+				t.Fatalf("the walks after %d writes: %d rows (first %q), %d keys, %d records; want %d each, the rows renamed", n, len(names), names[0], len(keys), len(ids), n)
+			}
+			var found int
+			if err := people.Lookup(ctx, 10, []any{int64(7 + ageOffset)}, func(_ engine.Key, row engine.Row) (bool, error) {
+				found++
+				return true, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if found != 1 {
+				t.Fatalf("a lookup by the age the writes gave row 7 found %d rows, want 1: the lookup walked the stored index", found)
 			}
 		}
 		before := blobs.bytes.Load()
