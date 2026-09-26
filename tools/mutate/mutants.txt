@@ -2492,3 +2492,123 @@ find: \t\tr.refs[path] = object.Ref{Model: r.refs[path].Model, Root: root}
 replace: \t\tr.refs[path] = object.Ref{Model: r.refs[path].Model, Root: r.refs[path].Root}\n\t\t_ = root
 pkg: ./engine
 run: ^TestConcurrentTransactionsShareAPublish$
+
+# read your writes without a flush (#9, DESIGN D13)
+id: kv-an-editor-reads-its-pending-edit
+file: model/kv/handle.go
+find: \tif p, ok := e.pending[string(key)]; ok {\n\t\tif p == nil {\n\t\t\treturn Value{}, false, nil\n\t\t}\n\t\treturn *p, true, nil\n\t}\n\treturn e.m.Get(ctx, key)
+replace: \treturn e.m.Get(ctx, key)
+pkg: ./model/kv
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: kv-a-scan-lays-a-pending-edit-over-a-stored-entry
+file: model/kv/handle.go
+find: \t\tif e.sok && bytes.Equal(e.sk, o.key) {\n\t\t\te.primed = false\n\t\t}
+replace: \t\tif false {\n\t\t\te.primed = false\n\t\t}
+pkg: ./model/kv
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: kv-a-scan-drops-a-pending-delete
+file: model/kv/handle.go
+find: \t\tif o.v != nil {\n\t\t\treturn o.key, *o.v, true, nil\n\t\t}
+replace: \t\tif o.v == nil {\n\t\t\treturn o.key, Value{}, true, nil\n\t\t}\n\t\treturn o.key, *o.v, true, nil
+pkg: ./model/kv
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: kv-a-scan-starts-at-from-for-pending-edits-too
+file: model/kv/handle.go
+find: \t\tif bytes.Compare([]byte(k), from) >= 0 {\n\t\t\tover = append(over, overlay{key: []byte(k), v: v})\n\t\t}
+replace: \t\tover = append(over, overlay{key: []byte(k), v: v})
+pkg: ./model/kv
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: document-an-editor-reads-its-pending-edit
+file: model/document/handle.go
+find: \tif p, ok := e.pending[string(id)]; ok {\n\t\tif p == nil {\n\t\t\treturn merge.Node{}, false, nil\n\t\t}\n\t\treturn *p, true, nil\n\t}\n\treturn e.c.Get(ctx, id)
+replace: \treturn e.c.Get(ctx, id)
+pkg: ./model/document
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: document-a-scan-lays-a-pending-edit-over-a-stored-record
+file: model/document/handle.go
+find: \t\tif r.sok && bytes.Equal(r.sk, o.id) {\n\t\t\tr.primed = false\n\t\t}
+replace: \t\tif false {\n\t\t\tr.primed = false\n\t\t}
+pkg: ./model/document
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: table-an-editor-reads-its-pending-row
+file: model/table/store.go
+find: \tif p, ok := e.pending[string(kb)]; ok {\n\t\tif p.row == nil {\n\t\t\treturn nil, false, nil\n\t\t}\n\t\treturn cloneRow(p.row, p.key, e.t), true, nil\n\t}\n\treturn e.t.Get(ctx, key)
+replace: \t_ = kb\n\treturn e.t.Get(ctx, key)
+pkg: ./model/table
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: table-a-scan-skips-the-stored-row-the-editor-changed
+file: model/table/store.go
+find: \t\t\t} else if r.skip[string(r.sk)] {\n\t\t\t\tcontinue\n\t\t\t}
+replace: \t\t\t}
+pkg: ./model/table
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: table-a-lookup-skips-the-stored-entry-of-a-row-the-editor-changed
+file: model/table/store.go
+find: \t\t\t\tif r.skip[string(rk)] {\n\t\t\t\t\tcontinue\n\t\t\t\t}
+replace: \t\t\t\t_ = rk
+pkg: ./model/table
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: table-a-lookup-lays-over-only-the-pending-rows-that-match
+file: model/table/store.go
+find: \t\tif bytes.HasPrefix(ik, lo) {\n\t\t\trows.over = append(rows.over, rowOverlay{at: ik, p: p})\n\t\t}
+replace: \t\trows.over = append(rows.over, rowOverlay{at: ik, p: p})
+pkg: ./model/table
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: engine-a-table-handle-reads-through-its-editor
+file: engine/txn.go
+find: \tif h.ed != nil { // the pending edits over the stored rows: nothing is flushed for a read\n\t\trow, ok, err = h.ed.Get(ctx, key)
+replace: \tif false {\n\t\trow, ok, err = h.ed.Get(ctx, key)
+pkg: ./engine
+run: ^TestATransactionReadsItsWritesWithoutFlushingThem$
+
+id: engine-a-kv-handle-reads-through-its-editor
+file: engine/txn.go
+find: \tif m.ed != nil { // the pending edits over the stored map: nothing is flushed for a read\n\t\tv, ok, err = m.ed.Get(ctx, key)
+replace: \tif false {\n\t\tv, ok, err = m.ed.Get(ctx, key)
+pkg: ./engine
+run: ^TestATransactionReadsItsWritesWithoutFlushingThem$
+
+id: engine-a-collection-handle-reads-through-its-editor
+file: engine/txn.go
+find: \tif c.ed != nil { // the pending edits over the stored records: nothing is flushed for a read\n\t\tn, ok, err = c.ed.Get(ctx, id)
+replace: \tif false {\n\t\tn, ok, err = c.ed.Get(ctx, id)
+pkg: ./engine
+run: ^TestATransactionReadsItsWritesWithoutFlushingThem$
+
+id: engine-a-table-scan-reads-through-the-editor
+file: engine/txn.go
+find: \tif h.ed != nil {\n\t\trows, err = h.ed.Scan(ctx)
+replace: \tif false {\n\t\trows, err = h.ed.Scan(ctx)
+pkg: ./engine
+run: ^TestATransactionReadsItsWritesWithoutFlushingThem$
+
+id: engine-a-lookup-reads-through-the-editor
+file: engine/txn.go
+find: \tif h.ed != nil {\n\t\trows, err = h.ed.IndexLookup(ctx, index, values...)
+replace: \tif false {\n\t\trows, err = h.ed.IndexLookup(ctx, index, values...)
+pkg: ./engine
+run: ^TestATransactionReadsItsWritesWithoutFlushingThem$
+
+id: engine-a-kv-scan-reads-through-the-editor
+file: engine/txn.go
+find: \tif m.ed != nil {\n\t\tes, err = m.ed.Scan(ctx, from)
+replace: \tif false {\n\t\tes, err = m.ed.Scan(ctx, from)
+pkg: ./engine
+run: ^(TestATransactionReadsItsWritesWithoutFlushingThem|TestAScanSeesWritesNotYetRead)$
+
+id: engine-a-collection-scan-reads-through-the-editor
+file: engine/txn.go
+find: \tif c.ed != nil {\n\t\trs, err = c.ed.Scan(ctx, from)
+replace: \tif false {\n\t\trs, err = c.ed.Scan(ctx, from)
+pkg: ./engine
+run: ^(TestATransactionReadsItsWritesWithoutFlushingThem|TestAScanSeesWritesNotYetRead)$
