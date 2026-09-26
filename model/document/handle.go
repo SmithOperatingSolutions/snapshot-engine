@@ -126,6 +126,18 @@ func (e *CollectionEditor) Delete(id []byte) error {
 	return e.ed.Delete(id)
 }
 
+// Get reads the record with id as the collection the editor would flush
+// holds it. Stub: the stored collection.
+func (e *CollectionEditor) Get(ctx context.Context, id []byte) (merge.Node, bool, error) {
+	return e.c.Get(ctx, id)
+}
+
+// Scan walks the collection the editor would flush from id from, inclusive
+// (nil: the first), in id order. Stub: the stored collection.
+func (e *CollectionEditor) Scan(ctx context.Context, from []byte) (*Records, error) {
+	return e.c.Scan(ctx, from)
+}
+
 // Flush writes the edits and returns the new collection; the editor goes
 // on editing it (the map's editor moves to the new map as it flushes).
 func (e *CollectionEditor) Flush(ctx context.Context) (*Collection, error) {
