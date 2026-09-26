@@ -729,6 +729,14 @@ still pays its publish: the journal's fsync and the pack's write. One
 session is unchanged on both backends: a batch of one shares nothing.
 Zipf retries rise with throughput, every one a real collision.
 
+**An object nobody else changed is taken as the member left it**, with
+no check and no flush: one session in memory, W3 for 15 s, runs at 979
+and 990 tx/s with that and at 540 and 528 with every object checked and
+flushed (two runs each, same binary otherwise). The bytes a lone
+member's publish takes are the same either way (the store keeps one
+copy of a chunk), so the saving is the leader's CPU, and no unit-scale
+test can see it; the figure is the guard.
+
 **Where the time goes now.** The run's checks read the member's changes
 and one item of the target per change, then one flush writes the objects
 the run touched; at 64 sessions in memory a batch is one flush of one
