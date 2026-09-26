@@ -791,8 +791,8 @@ run: ^TestAMapRefusesWhatIsNotOurs$
 
 id: kv-handle-scan-checks-the-frame
 file: model/kv/handle.go
-find: if v, err = checked(k, f); err != nil {
-replace: if v, _ = checked(k, f); err != nil {
+find: if v, err = checked(e.sk, e.sf); err != nil {
+replace: if v, _ = checked(e.sk, e.sf); err != nil {
 pkg: ./model/kv
 run: ^TestAMapRefusesWhatIsNotOurs$
 
@@ -847,8 +847,8 @@ run: ^TestACollectionRefusesWhatIsNotOurs$
 
 id: document-handle-scan-checks-the-frame
 file: model/document/handle.go
-find: if n, err = checked(k, f); err != nil {
-replace: if n, _ = checked(k, f); err != nil {
+find: if n, err = checked(r.sk, r.sf); err != nil {
+replace: if n, _ = checked(r.sk, r.sf); err != nil {
 pkg: ./model/document
 run: ^TestACollectionRefusesWhatIsNotOurs$
 
@@ -1035,20 +1035,6 @@ replace: \tnext.Working = w.Root() // the engine keeps no staging area
 pkg: ./engine
 run: ^TestABranchMidMergeTakesNoTransaction$
 
-id: engine-txn-reads-see-own-writes
-file: engine/txn.go
-find: \tif err := h.flush(ctx); err != nil {\n\t\treturn nil, false, err\n\t}
-replace: \tif err := error(nil); err != nil {\n\t\treturn nil, false, err\n\t}
-pkg: ./engine
-run: ^TestATransactionReadsItsSnapshotAndItsOwnWrites$
-
-id: engine-txn-scan-sees-own-writes
-file: engine/txn.go
-find: \tif err := h.flush(ctx); err != nil {\n\t\treturn err\n\t}\n\trows, err := h.t.Scan(ctx)
-replace: \tif err := error(nil); err != nil {\n\t\treturn err\n\t}\n\trows, err := h.t.Scan(ctx)
-pkg: ./engine
-run: ^TestATransactionReadsItsSnapshotAndItsOwnWrites$
-
 id: engine-txn-a-scan-stops-when-told
 file: engine/txn.go
 find: \t\tif more, err := each(k, r); err != nil || !more {
@@ -1069,13 +1055,6 @@ find: \tcase errors.Is(err, table.ErrDuplicate):\n\t\tto = ErrExists
 replace: \tcase errors.Is(err, table.ErrDuplicate):\n\t\tto = ErrInvalid
 pkg: ./engine
 run: ^TestARefusedWriteWritesNothing$
-
-id: engine-txn-lookup-sees-own-writes
-file: engine/txn.go
-find: \tif err := h.flush(ctx); err != nil {\n\t\treturn err\n\t}\n\trows, err := h.t.IndexLookup(ctx, index, values...)
-replace: \tif err := error(nil); err != nil {\n\t\treturn err\n\t}\n\trows, err := h.t.IndexLookup(ctx, index, values...)
-pkg: ./engine
-run: ^TestATransactionReadsItsSnapshotAndItsOwnWrites$
 
 id: engine-txn-an-open-table-is-one-handle
 file: engine/txn.go
@@ -1579,20 +1558,6 @@ replace: func (c *Collection) drop() {}
 pkg: ./engine
 run: ^TestKVAndCollectionsAreObjectsByName$
 
-id: engine-txn-kinds-kv-reads-see-own-writes
-file: engine/txn.go
-find: \tif err := m.flush(ctx); err != nil {\n\t\treturn Value{}, false, err\n\t}
-replace: \tif err := error(nil); err != nil {\n\t\treturn Value{}, false, err\n\t}
-pkg: ./engine
-run: ^TestAKVHandleReadsItsWritesAndRefusesWhatIsNotAValue$
-
-id: engine-txn-kinds-collection-reads-see-own-writes
-file: engine/txn.go
-find: \tif err := c.flush(ctx); err != nil {\n\t\treturn Node{}, false, err\n\t}
-replace: \tif err := error(nil); err != nil {\n\t\treturn Node{}, false, err\n\t}
-pkg: ./engine
-run: ^TestACollectionHandleReadsItsWritesAndRefusesWhatIsNotADocument$
-
 id: engine-txn-kinds-a-refused-kv-value-is-invalid
 file: engine/txn.go
 find: \tcase errors.Is(err, kv.ErrKey), errors.Is(err, kv.ErrValue):
@@ -1620,20 +1585,6 @@ find: \t\tif more, err := each(id, n); err != nil || !more {
 replace: \t\tif _, err := each(id, n); err != nil {
 pkg: ./engine
 run: ^TestACollectionHandleReadsItsWritesAndRefusesWhatIsNotADocument$
-
-id: engine-txn-kinds-kv-scans-see-own-writes
-file: engine/txn.go
-find: \tif err := m.flush(ctx); err != nil {\n\t\treturn err\n\t}\n\tes, err := m.m.Scan(ctx, from)
-replace: \tif err := error(nil); err != nil {\n\t\treturn err\n\t}\n\tes, err := m.m.Scan(ctx, from)
-pkg: ./engine
-run: ^TestAScanSeesWritesNotYetRead$
-
-id: engine-txn-kinds-collection-scans-see-own-writes
-file: engine/txn.go
-find: \tif err := c.flush(ctx); err != nil {\n\t\treturn err\n\t}\n\trs, err := c.c.Scan(ctx, from)
-replace: \tif err := error(nil); err != nil {\n\t\treturn err\n\t}\n\trs, err := c.c.Scan(ctx, from)
-pkg: ./engine
-run: ^TestAScanSeesWritesNotYetRead$
 
 id: engine-txn-faults-begin-surfaces-an-unreadable-working-set
 file: engine/txn.go
@@ -1679,22 +1630,22 @@ run: ^TestABackendFailingAReadFailsTheCall$
 
 id: engine-txn-faults-a-table-read-surfaces-a-failure
 file: engine/txn.go
-find: row, ok, err := h.t.Get(ctx, key)\n\tif err != nil {
-replace: row, ok, err := h.t.Get(ctx, key)\n\tif err != nil && false {
+find: \t\trow, ok, err = h.t.Get(ctx, key)\n\t}\n\tif err != nil {
+replace: \t\trow, ok, err = h.t.Get(ctx, key)\n\t}\n\tif err != nil && false {
 pkg: ./engine
 run: ^TestABackendFailingAReadFailsTheCall$
 
 id: engine-txn-faults-a-kv-read-surfaces-a-failure
 file: engine/txn.go
-find: v, ok, err := m.m.Get(ctx, key)\n\tif err != nil {
-replace: v, ok, err := m.m.Get(ctx, key)\n\tif err != nil && false {
+find: \t\tv, ok, err = m.m.Get(ctx, key)\n\t}\n\tif err != nil {
+replace: \t\tv, ok, err = m.m.Get(ctx, key)\n\t}\n\tif err != nil && false {
 pkg: ./engine
 run: ^TestABackendFailingAReadFailsTheCall$
 
 id: engine-txn-faults-a-collection-read-surfaces-a-failure
 file: engine/txn.go
-find: n, ok, err := c.c.Get(ctx, id)\n\tif err != nil {
-replace: n, ok, err := c.c.Get(ctx, id)\n\tif err != nil && false {
+find: \t\tn, ok, err = c.c.Get(ctx, id)\n\t}\n\tif err != nil {
+replace: \t\tn, ok, err = c.c.Get(ctx, id)\n\t}\n\tif err != nil && false {
 pkg: ./engine
 run: ^TestABackendFailingAReadFailsTheCall$
 
@@ -1703,14 +1654,14 @@ file: engine/txn.go
 find: next, err := m.ed.Flush(ctx)\n\tif err != nil {
 replace: next, err := m.ed.Flush(ctx)\n\tif err != nil && false {
 pkg: ./engine
-run: ^TestABackendFailingAReadFailsTheCall$
+run: ^(TestABackendFailingACommitWritesNothing|TestABackendFailingAReadFailsTheCall)$
 
 id: engine-txn-faults-a-collection-flush-surfaces-a-failure
 file: engine/txn.go
 find: next, err := c.ed.Flush(ctx)\n\tif err != nil {
 replace: next, err := c.ed.Flush(ctx)\n\tif err != nil && false {
 pkg: ./engine
-run: ^TestABackendFailingAReadFailsTheCall$
+run: ^(TestABackendFailingACommitWritesNothing|TestABackendFailingAReadFailsTheCall)$
 
 id: engine-txn-faults-a-finished-transactions-kv-map-refuses
 file: engine/txn.go
