@@ -114,6 +114,18 @@ func (e *MapEditor) Delete(key []byte) error {
 	return e.ed.Delete(key)
 }
 
+// Get reads key as the map the editor would flush holds it. Stub: the
+// stored map.
+func (e *MapEditor) Get(ctx context.Context, key []byte) (Value, bool, error) {
+	return e.m.Get(ctx, key)
+}
+
+// Scan walks the map the editor would flush from key from, inclusive
+// (nil: the first), in key order. Stub: the stored map.
+func (e *MapEditor) Scan(ctx context.Context, from []byte) (*Entries, error) {
+	return e.m.Scan(ctx, from)
+}
+
 // Flush writes the edits and returns the new map; the editor goes on
 // editing it (the map's editor moves to the new map as it flushes).
 func (e *MapEditor) Flush(ctx context.Context) (*Map, error) {
