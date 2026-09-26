@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/merge"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/model"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/object"
@@ -347,102 +346,14 @@ func (t *Txn) Commit(ctx context.Context) (err error) {
 	return t.s.db.enqueue(t.s.branch, &queued{ctx: ctx, tx: t, ours: ours})
 }
 
-// onto is the namespace the transaction makes of cur: its own when cur is
-// its snapshot, else its changes rebased onto cur (rebase) or, where a
-// rebase cannot take them, ours merged with cur through the models
-// (merged).
+// onto is the namespace a member the run declined makes of cur (D23): its
+// own when cur is its snapshot, else ours merged with cur through the
+// models (merged).
 func (t *Txn) onto(ctx context.Context, ours, cur *object.Namespace) (*object.Namespace, error) {
 	if cur.Root() == t.base.Root() {
 		return ours, nil
 	}
-	if next, ok, err := t.rebase(ctx, ours, cur); err != nil || ok {
-		return next, err
-	}
 	return t.merged(ctx, ours, cur)
-}
-
-// rebaser is a model that can apply one side's changes to a target at the
-// side's cost (table, kv, document: Rebase).
-type rebaser interface {
-	Rebase(ctx context.Context, base, side, onto model.Root, rw chunk.ReadWriter) (model.Root, error)
-}
-
-// rebaser is the model of id as a rebaser, or nil.
-func (m models) rebaser(id model.ID) rebaser {
-	switch id {
-	case table.ID:
-		return m.table
-	case kv.ID:
-		return m.kv
-	case document.ID:
-		return m.document
-	}
-	return nil
-}
-
-// rebase applies the transaction's changes to cur item by item: an object
-// only it changed is its own, one cur changed too is its model's Rebase,
-// which reads the transaction's changes and cur's item for each, not what
-// landed in cur since the snapshot (DESIGN D20). The result is what merged
-// makes, and an item cur holds otherwise than the snapshot did is the
-// item rule's ErrSerialization, as writeWrite has it. It reports false,
-// leaving the decision to merged, for a change it does not take: an object
-// added, dropped or changed in kind on either side, one of a model without
-// Rebase, a table whose schema differs between the snapshot, ours and cur,
-// a kv key both wrote (a counter both incremented sums there, D18).
-func (t *Txn) rebase(ctx context.Context, ours, cur *object.Namespace) (*object.Namespace, bool, error) {
-	d, err := object.Diff(ctx, t.base, ours)
-	if err != nil {
-		return nil, false, translate(err)
-	}
-	e := cur.Editor()
-	for {
-		c, ok, err := d.Next()
-		if err != nil {
-			return nil, false, translate(err)
-		}
-		if !ok {
-			break
-		}
-		// An object added has no model before, one dropped none after
-		// (no rebaser), so only one modified in place, of one model
-		// with a Rebase, is taken.
-		rb := t.s.db.models.rebaser(c.To.Model)
-		if c.From.Model != c.To.Model || rb == nil {
-			return nil, false, nil
-		}
-		now, _, held, err := cur.Get(ctx, c.Path)
-		if err != nil {
-			return nil, false, translate(err)
-		}
-		if !held || now.Model != c.From.Model {
-			return nil, false, nil
-		}
-		next := c.To
-		if now != c.From { // cur changed it too: its items against ours'
-			root, err := rb.Rebase(ctx, c.From.Root, c.To.Root, now.Root, t.s.db.r.Chunks())
-			switch {
-			case errors.Is(err, table.ErrChangedSince), errors.Is(err, document.ErrChangedSince):
-				return nil, true, fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrSerialization)
-			case errors.Is(err, kv.ErrChangedSince), errors.Is(err, table.ErrSchema):
-				// A kv key both wrote may be a counter both incremented,
-				// which is not an item (D18): the merge sums it, and
-				// refuses every other key both wrote as writeWrite has it.
-				return nil, false, nil
-			case err != nil:
-				return nil, false, translate(err)
-			}
-			next = object.Ref{Model: c.To.Model, Root: root}
-		}
-		if err := e.Put(c.Path, next); err != nil {
-			return nil, false, err
-		}
-	}
-	ns, err := e.Flush(ctx)
-	if err != nil {
-		return nil, false, translate(err)
-	}
-	return ns, true, nil
 }
 
 // merged is ours merged with cur through the models, refused
@@ -610,11 +521,7 @@ func eachItem(ctx context.Context, d *object.DiffIter, c object.Change, each fun
 		if !ok {
 			return false, nil
 		}
-		item := mc.Location
-		if c.To.Model == table.ID && mc.Kind == model.Modified && len(item) >= 2 {
-			item = item[:len(item)-2] // a cell's location: the row's, then the column's tag
-		}
-		if !each(string(item)) {
+		if !each(string(mc.Location)) {
 			return false, nil
 		}
 	}

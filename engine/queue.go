@@ -269,22 +269,47 @@ func (d *Database) attempt(ctx context.Context, q *branchQueue, branch string, b
 		failAll(translate(err))
 		return false
 	}
+	// Members are applied in runs (D23): a run takes members one after
+	// another, checking each against the working set it began on and the
+	// members taken before it, and writes every object the run touched
+	// once when it closes. A member the run declines closes it and is
+	// merged onto what the run made, on its own, as a commit alone is.
 	applied := 0
+	r := d.newRun(branch, g, w)
+	closeRun := func() {
+		next, ok := r.close(ctx, errs)
+		if !ok {
+			return
+		}
+		applied += len(r.members)
+		w = next
+	}
 	for i, c := range batch {
 		if errs[i] != nil {
 			continue
 		}
+		err := r.take(c.ctx, i, c)
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, errDeclined) {
+			errs[i] = err
+			continue
+		}
+		closeRun()
 		next, err := c.tx.onto(c.ctx, c.ours, w)
 		if err == nil {
 			err = d.mayWrite(c.ctx, c.tx.s.p, branch, w, next, g)
 		}
 		if err != nil {
 			errs[i] = err
-			continue
+		} else {
+			w = next
+			applied++
 		}
-		w = next
-		applied++
+		r = d.newRun(branch, g, w) // the next run begins on what the merge made
 	}
+	closeRun()
 	if applied == 0 || w.Root() == cur.Working {
 		return false // nothing to publish: the members applied changed nothing
 	}
@@ -342,10 +367,21 @@ func (d *Database) mayWrite(ctx context.Context, p Principal, branch string, fro
 		if !ok {
 			break
 		}
-		if err := auth.Check(ctx, d.o.Authorizer, p, auth.Write, "path:"+branch+":"+c.Path); err != nil {
+		paths = append(paths, c.Path)
+	}
+	return d.mayWritePaths(ctx, p, branch, paths, g)
+}
+
+// mayWritePaths is mayWrite for objects named by path: the ones a member
+// changed, by its own diff (a run materializes no namespace per member).
+func (d *Database) mayWritePaths(ctx context.Context, p Principal, branch string, paths []string, g *granted) error {
+	if err := auth.Check(ctx, d.o.Authorizer, p, auth.Write, "branch:"+branch); err != nil {
+		return translate(err)
+	}
+	for _, path := range paths {
+		if err := auth.Check(ctx, d.o.Authorizer, p, auth.Write, "path:"+branch+":"+path); err != nil {
 			return translate(err)
 		}
-		paths = append(paths, c.Path)
 	}
 	g.allow(auth.Write, "branch:"+branch)
 	for _, path := range paths {

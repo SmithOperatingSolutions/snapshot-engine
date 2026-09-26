@@ -872,35 +872,28 @@ file: engine/txn.go
 find: \t\tif hit {\n\t\t\treturn fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrSerialization)
 replace: \t\tif false {\n\t\t\treturn fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrSerialization)
 pkg: ./engine
-run: ^(TestARebaseMakesWhatTheMergeMakes|TestTransactionsWritingOneItemSerializeWhateverTheyWrote)$
+run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
 
 id: engine-txn-only-objects-this-transaction-modified-are-compared
 file: engine/txn.go
 find: \t\tif c.Kind == prolly.Modified && c.From.Model == c.To.Model {\n\t\t\tmine[c.Path] = c
 replace: \t\tif false {\n\t\t\tmine[c.Path] = c
 pkg: ./engine
-run: ^(TestARebaseMakesWhatTheMergeMakes|TestTransactionsWritingOneItemSerializeWhateverTheyWrote)$
-
-id: engine-txn-a-changed-cell-is-its-row
-file: engine/txn.go
-find: \t\tif c.To.Model == table.ID && mc.Kind == model.Modified && len(item) >= 2 {
-replace: \t\tif false {
-pkg: ./engine
-run: ^(TestARebaseMakesWhatTheMergeMakes|TestTransactionsWritingOneItemSerializeWhateverTheyWrote)$
+run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
 
 id: engine-txn-items-both-wrote-are-found
 file: engine/txn.go
 find: \t\thit = written[item]
 replace: \t\thit = false
 pkg: ./engine
-run: ^(TestARebaseMakesWhatTheMergeMakes|TestTransactionsWritingOneItemSerializeWhateverTheyWrote)$
+run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
 
 id: engine-txn-different-items-do-not-conflict
 file: engine/txn.go
 find: \t\thit = written[item]
 replace: \t\thit = true
 pkg: ./engine
-run: ^(TestARebaseMakesWhatTheMergeMakes|TestTransactionsWritingDifferentItemsAllCommit)$
+run: ^TestConcurrentIncrementsOfOneCounterBothCommit$
 
 id: engine-txn-a-schema-change-is-every-row
 file: engine/txn.go
@@ -1019,7 +1012,7 @@ file: engine/txn.go
 find: \tif cur.Root() == t.base.Root() {\n\t\treturn ours, nil
 replace: \tif true {\n\t\treturn ours, nil
 pkg: ./engine
-run: ^TestTwoTransactionsOnDifferentRowsBothCommit$
+run: ^TestATransactionAlteringATableConflictsWithOneWritingItsRows$
 
 id: engine-txn-a-collision-serializes
 file: engine/txn.go
@@ -2132,15 +2125,15 @@ run: ^TestSessionCommitsAndMergesTakeTheirTurnWithTransactions$
 
 id: engine-queue-each-member-applies-onto-the-last
 file: engine/queue.go
-find: \t\tw = next\n
-replace: \t\t_ = next\n
+find: \t\t\tw = next\n\t\t\tapplied++
+replace: \t\t\tapplied++
 pkg: ./engine
-run: ^TestConcurrentTransactionsShareAPublish$
+run: ^TestObjectsByName$
 
-id: engine-queue-a-moved-working-set-is-merged
-file: engine/txn.go
-find: \tif cur.Root() == t.base.Root() {\n\t\treturn ours, nil
-replace: \tif true {\n\t\treturn ours, nil
+id: engine-queue-a-run-applies-onto-the-last
+file: engine/queue.go
+find: \t\tapplied += len(r.members)\n\t\tw = next
+replace: \t\tapplied += len(r.members)\n\t\t_ = next
 pkg: ./engine
 run: ^TestConcurrentTransactionsShareAPublish$
 
@@ -2149,7 +2142,7 @@ file: engine/txn.go
 find: \tif err := t.writeWrite(ctx, ours, cur); err != nil {
 replace: \tif err := error(nil); err != nil {
 pkg: ./engine
-run: ^(TestARebaseMakesWhatTheMergeMakes|TestAMemberThatCollidesFailsAloneAndTheRestOfItsBatchCommits)$
+run: ^TestTransactionsWritingOneItemSerializeWhateverTheyWrote$
 
 id: engine-queue-a-lost-swap-rebuilds
 file: engine/queue.go
@@ -2163,19 +2156,19 @@ file: engine/queue.go
 find: \t\t\terr = d.mayWrite(c.ctx, c.tx.s.p, branch, w, next, g)
 replace: \t\t\t_ = d.mayWrite
 pkg: ./engine
-run: ^TestAMemberDeniedWriteFailsAloneInItsBatch$
+run: ^TestADeclinedMemberDeniedWriteFailsAloneInItsBatch$
 
 id: engine-queue-each-object-a-member-writes-is-asked
 file: engine/queue.go
-find: \t\tif err := auth.Check(ctx, d.o.Authorizer, p, auth.Write, "path:"+branch+":"+c.Path); err != nil {
-replace: \t\tif err := error(nil); err != nil {
+find: \tfor _, path := range paths {\n\t\tif err := auth.Check(ctx, d.o.Authorizer, p, auth.Write, "path:"+branch+":"+path); err != nil {\n\t\t\treturn translate(err)\n\t\t}\n\t}
+replace: 
 pkg: ./engine
 run: ^TestAMemberDeniedWriteFailsAloneInItsBatch$
 
 id: engine-queue-a-member-is-asked-for-write-on-the-branch
 file: engine/queue.go
-find: \tif err := auth.Check(ctx, d.o.Authorizer, p, auth.Write, "branch:"+branch); err != nil {
-replace: \tif err := error(nil); err != nil {
+find: \tif err := auth.Check(ctx, d.o.Authorizer, p, auth.Write, "branch:"+branch); err != nil {\n\t\treturn translate(err)\n\t}\n\tfor _, path := range paths {
+replace: \tfor _, path := range paths {
 pkg: ./engine
 run: ^TestAProtectedMainTakesMergesNotDirectWrites$
 
@@ -2202,8 +2195,8 @@ run: ^TestACommitCancelledOnceItsPublishIsUnderWayLearnsItsOutcome$
 
 id: engine-queue-a-member-that-fails-is-left-out
 file: engine/queue.go
-find: \t\tif errs[i] != nil {\n\t\t\tcontinue\n\t\t}\n\t\tnext, err
-replace: \t\tif false {\n\t\t\tcontinue\n\t\t}\n\t\tnext, err
+find: \t\tif errs[i] != nil {\n\t\t\tcontinue\n\t\t}\n\t\terr := r.take
+replace: \t\tif false {\n\t\t\tcontinue\n\t\t}\n\t\terr := r.take
 pkg: ./engine
 run: ^TestAMemberDeniedReadFailsAloneInItsBatch$
 
@@ -2436,59 +2429,66 @@ replace: \tctx := batch[0].ctx
 pkg: ./engine
 run: ^TestABatchRunsUntilItsLatestMembersDeadline$
 
-# engine rebase (#8)
-id: engine-txn-rebase-takes-only-objects-modified-on-both-sides
-file: engine/txn.go
-find: \t\tif c.From.Model != c.To.Model || rb == nil {\n\t\t\treturn nil, false, nil
-replace: \t\tif rb == nil {\n\t\t\treturn nil, false, nil
+# engine runs: a batch's members applied as one (#22, DESIGN D23)
+id: engine-run-a-member-is-taken-into-the-run
+file: engine/queue.go
+find: \t\terr := r.take(c.ctx, i, c)\n\t\tif err == nil {\n\t\t\tcontinue\n\t\t}
+replace: \t\terr := errDeclined\n\t\tif err == nil {\n\t\t\tcontinue\n\t\t}
 pkg: ./engine
-run: ^TestARebaseMakesWhatTheMergeMakes$
+run: ^TestABatchWritesEachObjectOnce$
 
-id: engine-txn-rebase-leaves-an-object-cur-dropped-to-the-merge
-file: engine/txn.go
-find: \t\tif !held || now.Model != c.From.Model {
-replace: \t\tif (!held || now.Model != c.From.Model) && false {
+id: engine-run-an-item-both-wrote-serializes
+file: engine/batch.go
+find: \t\tcase errors.Is(err, table.ErrChangedSince), errors.Is(err, document.ErrChangedSince):\n\t\t\treturn fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrSerialization)
+replace: \t\tcase errors.Is(err, table.ErrChangedSince), errors.Is(err, document.ErrChangedSince):\n\t\t\treturn fmt.Errorf("%w: an item both wrote", errDeclined)
 pkg: ./engine
-run: ^TestARebaseMakesWhatTheMergeMakes$
+run: ^TestACollidingMemberFailsWithoutReadingWhatMoved$
 
-id: engine-txn-rebase-an-object-cur-changed-too-goes-through-its-model
-file: engine/txn.go
-find: \t\tif now != c.From { // cur changed it too: its items against ours'
-replace: \t\tif false { // cur changed it too: its items against ours'
+id: engine-run-a-kv-key-both-wrote-is-the-merges
+file: engine/batch.go
+find: \t\tcase errors.Is(err, kv.ErrChangedSince), errors.Is(err, table.ErrSchema):\n\t\t\treturn errDeclined
+replace: \t\tcase errors.Is(err, table.ErrSchema):\n\t\t\treturn errDeclined
 pkg: ./engine
-run: ^TestARebaseMakesWhatTheMergeMakes$
+run: ^TestConcurrentIncrementsOfOneCounterBothCommit$
 
-id: engine-txn-rebase-an-item-both-changed-serializes
-file: engine/txn.go
-find: \t\t\t\treturn nil, true, fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrSerialization)
-replace: \t\t\t\treturn nil, true, fmt.Errorf("%w: a transaction committed since this one began wrote an item this one writes", ErrInternal)
+id: engine-run-an-object-the-working-set-dropped-is-the-merges
+file: engine/batch.go
+find: \t\t\tif !held || now.Model != ch.From.Model {\n\t\t\t\treturn errDeclined
+replace: \t\t\tif false {\n\t\t\t\treturn errDeclined
 pkg: ./engine
-run: ^TestARebaseMakesWhatTheMergeMakes$
+run: ^TestAMemberWhoseObjectWasDroppedOrRemadeSinceItsSnapshotSerializes$
 
-id: engine-txn-rebase-leaves-a-kv-key-both-wrote-to-the-merge
-file: engine/txn.go
-find: \t\t\tcase errors.Is(err, kv.ErrChangedSince), errors.Is(err, table.ErrSchema):
-replace: \t\t\tcase errors.Is(err, table.ErrSchema):
+id: engine-run-a-member-may-write-what-it-changes
+file: engine/batch.go
+find: \tif err := r.d.mayWritePaths(ctx, t.s.p, r.branch, paths, r.g); err != nil {\n\t\treturn err\n\t}
+replace: \tif err := error(nil); err != nil {\n\t\treturn err\n\t}
 pkg: ./engine
-run: ^(TestConcurrentIncrementsOfOneCounterBothCommit|TestARebaseMakesWhatTheMergeMakes)$
+run: ^TestAMemberDeniedWriteFailsAloneInItsBatch$
 
-id: engine-txn-rebase-leaves-a-schema-change-to-the-merge
-file: engine/txn.go
-find: \t\t\tcase errors.Is(err, kv.ErrChangedSince), errors.Is(err, table.ErrSchema):
-replace: \t\t\tcase errors.Is(err, kv.ErrChangedSince):
+id: engine-run-a-member-is-allowed-what-it-was-asked
+file: engine/queue.go
+find: \tfor _, path := range paths {\n\t\tg.allow(auth.Write, "path:"+branch+":"+path)\n\t}\n\treturn nil
+replace: \treturn nil
 pkg: ./engine
-run: ^TestARebaseMakesWhatTheMergeMakes$
+run: ^TestABatchOfMembersWithDifferentGrantsPublishes$
 
-id: engine-txn-rebase-lands-the-rebased-object
-file: engine/txn.go
-find: \t\t\tnext = object.Ref{Model: c.To.Model, Root: root}
-replace: \t\t\t_ = root
+id: engine-run-closes-on-what-the-merge-made
+file: engine/queue.go
+find: \t\tr = d.newRun(branch, g, w) // the next run begins on what the merge made
+replace: \t\tr = d.newRun(branch, g, r.w)
 pkg: ./engine
-run: ^TestARebaseMakesWhatTheMergeMakes$
+run: ^TestObjectsByName$
 
-id: engine-txn-a-commit-onto-a-moved-working-set-is-rebased
-file: engine/txn.go
-find: \tif next, ok, err := t.rebase(ctx, ours, cur); err != nil || ok {\n\t\treturn next, err\n\t}
-replace: 
+id: engine-run-a-flush-fault-is-every-taken-members
+file: engine/batch.go
+find: \t\tfor _, i := range r.members {\n\t\t\terrs[i] = err\n\t\t}
+replace: \t\tfor _, i := range r.members[:0] {\n\t\t\terrs[i] = err\n\t\t}
 pkg: ./engine
-run: ^TestACommitOntoAMovedWorkingSetReadsItsOwnChangesNotWhatMoved$
+run: ^TestARunsFailureIsEveryTakenMembers$
+
+id: engine-run-the-next-run-starts-where-this-one-ended
+file: engine/batch.go
+find: \t\tr.refs[path] = object.Ref{Model: r.refs[path].Model, Root: root}
+replace: \t\tr.refs[path] = object.Ref{Model: r.refs[path].Model, Root: r.refs[path].Root}\n\t\t_ = root
+pkg: ./engine
+run: ^TestConcurrentTransactionsShareAPublish$

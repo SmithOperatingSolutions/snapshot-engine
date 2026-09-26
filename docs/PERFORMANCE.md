@@ -678,3 +678,69 @@ through the core.
 **These W8 rows also record the rebase's effect on W8 (#8)**, which was
 measured on W3 only: on v0.2.0 W8 went from 274.2 (disk) and 336.9
 (memory) before the rebase to 527.2 and 1,049.8 after it.
+
+## Runs (#22)
+
+DESIGN D23: a batch's members are applied in runs, each object the run
+touched flushed once when it closes, instead of one rebase and one flush
+per member. W3 and W8 at full scale on both backends, one run per lock on
+a quiet machine, nothing else run during them; "before" is `core-v0.3.0`
+as it ends (afc7ac4, the engine on v0.3.0), "after" this branch. No phase
+of any run lost an update. Load average during each run, median (max):
+disk before 1.67 (2.35), after 2.16 (3.41); memory W3 before 1.86 (4.72),
+after 1.92 (3.23); memory W8 below.
+
+W3 read-modify-write over a million rows, tx/s and p99; retries are
+serialization failures, every one a real collision under the item rule
+(none a lost swap), retried and committed:
+
+| Keys | Sessions | Disk before | p99 | retries | Disk after | p99 | retries | Memory before | p99 | retries | Memory after | p99 | retries |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| uniform | 1 | 127.1 | 10 ms | 0 | 127.1 | 10 ms | 0 | 1,012.7 | 2.1 ms | 0 | 1,004.3 | 2.1 ms | 0 |
+| uniform | 4 | 176.4 | 33 ms | 0 | 175.7 | 38 ms | 0 | 788.4 | 9.4 ms | 0 | 811.4 | 8.9 ms | 0 |
+| uniform | 16 | 331.8 | 101 ms | 0 | 322.4 | 101 ms | 0 | 616.6 | 38 ms | 0 | 673.0 | 36 ms | 1 |
+| uniform | 64 | 507.9 | 185 ms | 0 | **554.3** | 176 ms | 0 | 774.7 | 109 ms | 4 | **940.0** | 92 ms | 2 |
+| Zipf 1.1 | 1 | 126.3 | 10 ms | 0 | 127.1 | 10 ms | 0 | 966.1 | 2.1 ms | 0 | 962.2 | 2.2 ms | 0 |
+| Zipf 1.1 | 4 | 168.5 | 59 ms | 473 | 175.8 | 50 ms | 503 | 786.6 | 13 ms | 2,324 | 888.3 | 12 ms | 2,586 |
+| Zipf 1.1 | 16 | 254.2 | 185 ms | 2,202 | 272.8 | 168 ms | 2,283 | 518.3 | 88 ms | 4,452 | **643.3** | 71 ms | 5,752 |
+| Zipf 1.1 | 64 | 341.4 | 604 ms | 6,000 | 373.4 | 537 ms | 6,646 | 574.8 | 369 ms | 10,378 | **735.6** | 285 ms | 12,936 |
+
+W8, the sustained mix, 64 sessions for 5 minutes (the memory pair run on
+its own under a 24 GiB cap, since W3's million rows already on the heap
+put the combined run over it):
+
+| | Disk before | Disk after | Memory before | Memory after |
+| --- | ---: | ---: | ---: | ---: |
+| tx/s | 745.3 | **815.5** | 1,146.1 | **1,345.4** |
+| p99 | 159 ms | 151 ms | 92 ms | 80 ms |
+| serialization failures | 8 | 15 | 17 | 25 |
+| session commits (every 5 s) | 60 | 60 | 60 | 60 |
+| session commit p50 / p99 | 84 / 151 ms | 71 / 117 ms | 50 / 80 ms | 40 / 67 ms |
+| lost updates | 0 | 0 | 0 | 0 |
+| load, median (max) | 1.67 (2.35) | 2.16 (3.41) | 1.90 (2.57) | 2.00 (2.77) |
+
+**What changed.** In memory, where the leader's node writes were 54% of
+the CPU, 64 sessions went from 774.7 to 940.0 tx/s on uniform keys and
+from 574.8 to 735.6 on Zipf, 16 sessions from 616.6 to 673.0 and 518.3 to
+643.3, W8 from 1,146.1 to 1,345.4, and p99 at 64 sessions from 109 ms to
+92 ms. On disk the gain is
+9% at 64 sessions (507.9 to 554.3) and 9% on W8, since a batch there
+still pays its publish: the journal's fsync and the pack's write. One
+session is unchanged on both backends: a batch of one shares nothing.
+Zipf retries rise with throughput, every one a real collision.
+
+**An object nobody else changed is taken as the member left it**, with
+no check and no flush: one session in memory, W3 for 15 s, runs at 979
+and 990 tx/s with that and at 540 and 528 with every object checked and
+flushed (two runs each, same binary otherwise). The bytes a lone
+member's publish takes are the same either way (the store keeps one
+copy of a chunk), so the saving is the leader's CPU, and no unit-scale
+test can see it; the figure is the guard.
+
+**Where the time goes now.** The run's checks read the member's changes
+and one item of the target per change, then one flush writes the objects
+the run touched; at 64 sessions in memory a batch is one flush of one
+table. What remains in the leader is that flush and its hashing, and on
+disk the publish. The core's node cache (snapshot-core#32, item 7) and
+storing a host's nodes raw (snapshot-core#45) both cut what the flush
+costs.
