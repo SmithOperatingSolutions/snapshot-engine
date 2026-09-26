@@ -79,7 +79,7 @@ func TestATransactionReadsItsWritesWithoutFlushingThem(t *testing.T) {
 				t.Fatalf("the walks after %d writes: %d rows (first %q), %d keys, %d records; want %d each, the rows renamed", n, len(names), names[0], len(keys), len(ids), n)
 			}
 			var found int
-			if err := people.Lookup(ctx, 10, []any{int64(7 + ageOffset)}, func(_ engine.Key, row engine.Row) (bool, error) {
+			if err := people.Lookup(ctx, 10, []any{7 + ageOffset}, func(_ engine.Key, row engine.Row) (bool, error) {
 				found++
 				return true, nil
 			}); err != nil {
