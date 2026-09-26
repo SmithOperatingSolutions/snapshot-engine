@@ -45,6 +45,18 @@ type Blobs = blob.BlobStore
 // meter what reaches its backend) without importing the core.
 type BlobVersion = blob.Version
 
+// Journaler is a Blobs that keeps a commit journal beside its objects
+// (the core's port; DiskBlobs is one, MemoryBlobs is not). The core looks
+// for it by type, so a program that wraps Blobs hides the journal, and
+// every commit publishes in full, unless the wrapper is a Journaler too
+// when the store it wraps is one: wrap as `struct{ wrapper; Journaler }`
+// in that case (core v0.3.0, #34).
+type Journaler = blob.Journaler
+
+// Journal is an open commit journal, as Journaler.OpenJournal returns it:
+// named here for the same wrapper.
+type Journal = blob.Journal
+
 // Keyring holds a database's master key (the core's).
 type Keyring = seal.Keyring
 

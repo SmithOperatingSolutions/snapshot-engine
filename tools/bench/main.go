@@ -243,6 +243,33 @@ func (b *countingBlobs) SwapRoot(ctx context.Context, expected engine.BlobVersio
 	return v, err
 }
 
+// countingJournaler is countingBlobs over a backend with a commit journal:
+// the engine finds the journal by type, so a wrapper that is not a
+// Journaler would hide it and every commit would publish in full.
+type countingJournaler struct {
+	*countingBlobs
+	j engine.Journaler
+}
+
+func (b countingJournaler) OpenJournal(ctx context.Context) (engine.Journal, error) {
+	return b.j.OpenJournal(ctx)
+}
+
+func (b countingJournaler) HoldJournal(ctx context.Context) (int64, func(), error) {
+	return b.j.HoldJournal(ctx)
+}
+
+func (b countingJournaler) JournalByDefault() bool { return b.j.JournalByDefault() }
+
+// counting wraps blobs with a swap counter, keeping its journal if it has one.
+func counting(blobs engine.Blobs) (engine.Blobs, *countingBlobs) {
+	c := &countingBlobs{Blobs: blobs}
+	if j, ok := blobs.(engine.Journaler); ok {
+		return countingJournaler{c, j}, c
+	}
+	return c, c
+}
+
 func runSuite(c config, sc scale, backend string, rep *report) (err error) {
 	s := &suite{c: c, sc: sc, backend: backend, rep: rep, loaded: map[string]bool{}, log: &causes{}}
 	keys, err := engine.NewKeyring()
@@ -273,8 +300,7 @@ func runSuite(c config, sc scale, backend string, rep *report) (err error) {
 	case "mem":
 		s.o.Blobs = engine.MemoryBlobs()
 	}
-	s.blobs = &countingBlobs{Blobs: s.o.Blobs}
-	s.o.Blobs = s.blobs
+	s.o.Blobs, s.blobs = counting(s.o.Blobs)
 	if s.db, err = engine.Create(ctx, me, s.o); err != nil {
 		return err
 	}

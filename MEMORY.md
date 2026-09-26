@@ -81,8 +81,14 @@ new team may keep or revise them, and should record any change here.
   `flock`, which does not serve waiters in order, so a chain of long runs
   starves everyone else. Take the lock for one run at a time.
 - **The in-memory backend is the heap.** A long load run on
-  `engine.MemoryBlobs` grows until it hits its cap; the 5-minute W8 reached
-  12 GiB. Size memory runs, or use disk.
+  `engine.MemoryBlobs` grows until it hits its cap; the 5-minute W8 at
+  1,000 tx/s and more peaks near 16 GiB and needs a 24 GiB cap
+  (2026-09-26; a 16 GiB one killed it). `-duration` does not shorten W8.
+- **A wrapper around `Blobs` hides the core's journal.** The core finds a
+  backend's commit journal by type (`blob.Journaler`, core v0.3.0); a
+  wrapper that embeds the `Blobs` interface is not one, and every commit
+  then publishes in full, silently. Wrap as `engine.Journaler` says
+  (2026-09-26: the first v0.3.0 disk run measured nothing for this).
 
 ## The core, from here
 
