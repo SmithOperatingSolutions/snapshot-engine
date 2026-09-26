@@ -13,13 +13,13 @@ collection, and the Engine Spec's L0 to L3 checklists and security rows.
 See [snapshot-core's PROGRESS](https://github.com/SmithOperatingSolutions/snapshot-core/blob/main/docs/PROGRESS.md).
 The engine takes the core by tag (`go.mod`) and never tracks its items here.
 
-**Updated 2026-09-25** · E1 to E5 done, on snapshot-core v0.2.0; E0 done, the repository pushed and public (#13); transactions conflict per item (D18), found by the performance review (`docs/PERFORMANCE.md`), a counter's INCR and DECR excepted since v0.2.0 (#7); every model reads no value longer than it can store (D21, #7); a batch member is applied at its own cost (D22, #8)
+**Updated 2026-09-26** · E1 to E5 done, on snapshot-core v0.3.0 (#20); E0 done, the repository pushed and public (#13); transactions conflict per item (D18), found by the performance review (`docs/PERFORMANCE.md`), a counter's INCR and DECR excepted since v0.2.0 (#7); every model reads no value longer than it can store (D21, #7); a batch member is applied at its own cost (D22, #8)
 
 ## Milestones
 
 | Milestone | Status | Delivers | Exit criteria |
 | --- | --- | --- | --- |
-| **E0 Foundations** | ✅ Done | The module on snapshot-core v0.2.0 (v0.1.1 until #7; v0.1.0 until the models needed `model/mapobject`, `core/wire` and the Commit and Merge actions); the gates (fmt, vet, lint with the layer table, vuln, race, coverage, redcheck, mutants); `model/kv` at the bytes kind, passing the core's `model/contract` from outside the core, end to end through a repository; 23 mutants, 91% covered | A deliberately failing `test:` commit blocks a PR (first PR); a kv object round-trips through a repository and two branches setting different keys merge clean ✅ |
+| **E0 Foundations** | ✅ Done | The module on snapshot-core v0.3.0 (v0.2.0 until #20; v0.1.1 until #7; v0.1.0 until the models needed `model/mapobject`, `core/wire` and the Commit and Merge actions); the gates (fmt, vet, lint with the layer table, vuln, race, coverage, redcheck, mutants); `model/kv` at the bytes kind, passing the core's `model/contract` from outside the core, end to end through a repository; 23 mutants, 91% covered | A deliberately failing `test:` commit blocks a PR (first PR); a kv object round-trips through a repository and two branches setting different keys merge clean ✅ |
 | **E1 Merge library** | ✅ Done | `merge/`: `Scalar`, `Counter`, `Set` (observed-remove over write tags), `Sequence` (diff3 over element keys), `Tree` (a JSON-like `Node` merged by path, arrays as sequences, counter paths by option); conflicts as values with a path and a reason, never repaired; 97% covered, 11 mutants | Every policy has a property test: deterministic, one-sided change returns that side, symmetric (`TestScalarAndCounterProperties`, `TestSetProperties`, `TestSequenceProperties`, `TestTreeProperties`) |
 | **E2 Tables** | ✅ Done | `model/table`: catalog with tagged columns, order-preserving cell encoding for every v1 type, primary and index maps, a hidden row id, the row API, `WithSchema`; diff per row then cell; merge of schemas by column tag then of rows under the merged schema, cells through the merge library; three decoders, three fuzz targets; 37 mutants, 90% covered | Every E2 item below green ✅ |
 | **E3 Key-value** | ✅ Done | `model/kv` whole: bytes, counter, set (write tags), hash, sorted set, sequence, each a canonical bounded frame with a fuzz target and a merge policy through the merge library; conflicts located at the key and the field or member; 93% covered | Every E3 item below green ✅ |
@@ -40,6 +40,7 @@ Tracked as GitHub issues on SmithOperatingSolutions/snapshot-engine, not here:
 - #11 decisions made during the performance and bounds work, for review
 - #12 purge for legal deletion: build, plan, or document the limitation
 - #13 the first push: CI on GitHub, E0's last item, closing #2 to #6 (done: pushed 2026-09-25, public the same day)
+- #20 move to snapshot-core v0.3.0: journaled commits, one session on disk 28 to 127 tx/s (done on `core-v0.3.0`, awaiting its PR)
 - #1 the performance review; its comments record where it stands
 
 The core's side: snapshot-core#29 to #33.
@@ -47,7 +48,7 @@ The core's side: snapshot-core#29 to #33.
 ## Checklists
 
 ### E0 Foundations
-- [x] The module builds against snapshot-core v0.2.0 with `CGO_ENABLED=0`, no local workspace (v0.1.1 until #7; no engine code calls `stream.ReadAll`, whose signature v0.2.0 changed); the core's `tools/ci`, told the engine's layout, passes every gate (`mise run ci`, 2026-09-25; on v0.2.0, fmt, vet, lint, race, cover, redcheck, mutants and fuzz, run step by step under a memory cap).
+- [x] The module builds against snapshot-core v0.3.0 with `CGO_ENABLED=0`, no local workspace (v0.2.0 until #20, with no engine change; v0.1.1 until #7; no engine code calls `stream.ReadAll`, whose signature v0.2.0 changed); the core's `tools/ci`, told the engine's layout, passes every gate (`mise run ci`, 2026-09-25; on v0.2.0, fmt, vet, lint, race, cover, redcheck, mutants and fuzz, run step by step under a memory cap).
 - [x] The core's `redcheck` and `mutate` run here as Go tools (`go tool redcheck`, `go tool mutate`; `go.mod`).
 - [x] `go tool redcheck` blocks a PR whose `test:` commit passes without its change (#18, a throwaway pull request with a deliberately green `test:` commit: the red-check job failed on it, `TestRedcheckBlocksATestThatPassesWithoutItsChange` stayed green under its own commit; closed unmerged, 2026-09-25).
 - [x] `model/kv` with the bytes kind passes the core's `model/contract` (`TestContract`).
@@ -156,3 +157,4 @@ The core's side: snapshot-core#29 to #33.
 | group commit (#1), measured | The first queue merged each member as base, ours, the batch: the table model rewrote the member's tree with everything that landed since its snapshot, so a batch's later members each rewrote the earlier ones, and W3 at 64 sessions (41 tx/s in memory) ran slower than at 16 (146) | The batch's working set is the merge's first side (DESIGN D20): 163 and 265 tx/s; the item rule has left the sides disjoint, so the result is the same |
 | the rebase (#8) | With the rebase landed, six item-rule mutants in the merge path survived: the tests that proved them commit through `onto`, and the rebase now refuses an item both wrote before the merge runs | The guards stay, for every change the rebase declines; `TestARebaseMakesWhatTheMergeMakes` calls the merge directly as the rebase's authority and runs for those mutants too |
 | the rebase (#8), on core v0.2.0 | The rebase refused a kv key both wrote, so two INCRs of one counter in a batch serialized again, undoing #7; caught by #7's own test once the branches met | A kv key both wrote declines to the merge, where a counter's delta leaves the item rule and sums (D18, D22) |
+| the move to snapshot-core v0.3.0 (#20) | The first disk run measured no change: the bench counts root swaps through a wrapper that embeds the `Blobs` interface, and the core finds a backend's commit journal by type (`blob.Journaler`), which the wrapper did not carry | The counter is a Journaler when the store it wraps is one (`TestTheSwapCounterKeepsTheBackendsJournal`); the engine names `Journaler` and `Journal` and says how to wrap. A table fault test inserted a key past the tree, which v0.3.0 answers from the root node it holds: the fixture inserts a key inside the range |

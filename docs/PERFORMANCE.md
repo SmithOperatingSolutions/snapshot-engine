@@ -608,3 +608,73 @@ still does all of a batch's work alone, at each member's own cost; a
 batch of 64 members is 64 rebases in a row. The options the issue
 names remain: rebasing members in parallel against the batch start, and
 the core's decoded-node cache (snapshot-core#32).
+
+## Core v0.3.0 (#20)
+
+The move to snapshot-core v0.3.0: journaled commits (core #34, its
+D16; on by default on disk, off in memory), a tree's nodes stored raw,
+a map's root read once, and a commit that asks the authorizer by what
+the flush recorded. No engine code changed for the move. W3 and W8 at
+full scale on both backends, one run per lock on a quiet machine,
+nothing else run during them; "before" is main on v0.2.0 (5110791),
+"after" the same engine on v0.3.0. No phase of any run lost an update.
+Load average during each run, median (max): disk before 2.76 (4.77),
+after 1.95 (2.50); memory W3 before 1.42 (2.02), after 1.38 (1.83); memory
+W8 before 2.82 (3.88), after 1.53 (2.25).
+
+**A wrapper hid the journal.** The first v0.3.0 disk run measured no
+change at all (one session 29.0 against 28.3 tx/s, the same 33 ms p50):
+the bench counts root swaps through a wrapper around `Blobs`, and the
+core finds a backend's journal by type (`blob.Journaler`), which a
+wrapper that embeds the `Blobs` interface does not carry. The counter is
+a Journaler itself now when the store it wraps is one
+(`tools/bench`, `TestTheSwapCounterKeepsTheBackendsJournal`), and the
+engine names `Journaler` and `Journal` so a program held to `engine/`
+can wrap the same way. The figures below are from the rerun.
+
+**W8 in memory needs a 24 GiB cap.** The memory backend is the heap, and
+five minutes of W8 above 1,000 tx/s peak near 16 GiB; both memory W8
+runs were taken under a 24 GiB cap after a 16 GiB one killed them.
+
+W3 read-modify-write over a million rows, tx/s and p99; retries are
+serialization failures, every one a real collision under the item rule
+(none a lost swap), retried and committed:
+
+| Keys | Sessions | Disk v0.2.0 | p99 | retries | Disk v0.3.0 | p99 | retries | Memory v0.2.0 | p99 | retries | Memory v0.3.0 | p99 | retries |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| uniform | 1 | 28.3 | 55 ms | 0 | **127.2** | 10 ms | 0 | 928.5 | 2.4 ms | 0 | 987.7 | 2.2 ms | 0 |
+| uniform | 4 | 53.5 | 105 ms | 0 | **179.4** | 31 ms | 0 | 749.2 | 10 ms | 0 | 781.1 | 10 ms | 0 |
+| uniform | 16 | 156.5 | 134 ms | 0 | **321.6** | 96 ms | 0 | 601.0 | 40 ms | 0 | 621.0 | 40 ms | 1 |
+| uniform | 64 | 380.2 | 201 ms | 1 | **496.5** | 201 ms | 1 | 709.4 | 117 ms | 2 | 784.6 | 105 ms | 4 |
+| Zipf 1.1 | 1 | 29.0 | 57 ms | 0 | **120.3** | 12 ms | 0 | 888.2 | 2.2 ms | 0 | 970.5 | 2.1 ms | 0 |
+| Zipf 1.1 | 4 | 49.5 | 176 ms | 140 | **168.9** | 57 ms | 440 | 733.4 | 13 ms | 2,214 | 744.0 | 14 ms | 2,192 |
+| Zipf 1.1 | 16 | 121.7 | 386 ms | 1,072 | **259.8** | 176 ms | 2,201 | 486.2 | 92 ms | 4,274 | 509.9 | 92 ms | 4,510 |
+| Zipf 1.1 | 64 | 241.7 | 805 ms | 4,355 | **343.6** | 570 ms | 5,996 | 532.2 | 386 ms | 9,817 | 567.9 | 352 ms | 10,179 |
+
+W8, the sustained mix, 64 sessions for 5 minutes:
+
+| | Disk v0.2.0 | Disk v0.3.0 | Memory v0.2.0 | Memory v0.3.0 |
+| --- | ---: | ---: | ---: | ---: |
+| tx/s | 527.2 | **750.5** | 1,049.8 | 1,147.9 |
+| p99 | 185 ms | 159 ms | 101 ms | 92 ms |
+| serialization failures | 2 | 4 | 15 | 19 |
+| session commits (every 5 s) | 60 | 60 | 60 | 60 |
+| session commit p99 | 185 ms | 134 ms | 76 ms | 71 ms |
+| lost updates | 0 | 0 | 0 | 0 |
+
+**What changed.** On disk a commit is the journal's append and fsync
+instead of a full publish, so the floor a single session sits on fell
+from 33 ms to 5.5 ms at commit p50, and one session went from 28.3 to
+127.2 tx/s, 4.5 times. The gain shrinks as sessions are added, because
+group commit was already amortizing the publish across a batch: 3.4
+times at 4 sessions, 2.1 at 16, 1.3 at 64. W8 on disk went from 527 to
+751 tx/s. In memory, which keeps no journal, every row gains 3 to 11%
+from the rest of v0.3.0. Zipf retries rise with throughput, every one a
+real collision. Other processes see a commit once its background
+publish lands, within a second: the engine's own tests, which open a
+second `Database` on one store, all pass, since each reads the root
+through the core.
+
+**These W8 rows also record the rebase's effect on W8 (#8)**, which was
+measured on W3 only: on v0.2.0 W8 went from 274.2 (disk) and 336.9
+(memory) before the rebase to 527.2 and 1,049.8 after it.
