@@ -350,7 +350,8 @@ func (t *Table) Get(ctx context.Context, key Key) (Row, bool, error) {
 	return row, true, nil
 }
 
-// Rows walks rows in key order.
+// Rows walks rows in key order, or in an index's order: the stored rows,
+// with an editor's pending edits laid over them when it made the walk.
 type Rows struct {
 	t       *Table
 	ctx     context.Context
@@ -358,6 +359,22 @@ type Rows struct {
 	indexed bool   // it walks an index: each entry names a row to read
 	index   *Index // that index
 	err     error
+	// an editor's pending rows in the walk's order (by row key, or by
+	// index entry), and the keys of every row it changed, whose stored
+	// entries the walk skips
+	over []rowOverlay
+	skip map[string]bool
+	// the stored entry read ahead, so the two can be merged
+	sk, sv []byte
+	sok    bool
+	primed bool
+}
+
+// rowOverlay is one pending row at its place in the walk: at is its row
+// key, or its index entry.
+type rowOverlay struct {
+	at []byte
+	p  *pendingRow
 }
 
 // Next returns the next row and its key; ok is false at the end.
@@ -365,10 +382,52 @@ func (r *Rows) Next() (Key, Row, bool, error) {
 	if r.err != nil {
 		return nil, nil, false, r.err
 	}
-	kb, vb, ok, err := r.it.Next()
-	if err != nil || !ok {
-		return nil, nil, false, err
+	if r.skip == nil {
+		kb, vb, ok, err := r.it.Next()
+		if err != nil || !ok {
+			return nil, nil, false, err
+		}
+		return r.row(kb, vb)
 	}
+	for {
+		if !r.primed {
+			var err error
+			if r.sk, r.sv, r.sok, err = r.it.Next(); err != nil {
+				return nil, nil, false, err
+			}
+			r.primed = true
+		}
+		var o *rowOverlay
+		if len(r.over) > 0 {
+			o = &r.over[0]
+		}
+		if o == nil && !r.sok {
+			return nil, nil, false, nil
+		}
+		if o == nil || (r.sok && bytes.Compare(r.sk, o.at) < 0) {
+			r.primed = false
+			if r.indexed { // a row the editor changed is walked from its pending entry, if it still matches
+				rk, err := r.t.rowKeyOfIndexEntry(*r.index, r.sk)
+				if err != nil {
+					return nil, nil, false, err
+				}
+				if r.skip[string(rk)] {
+					continue
+				}
+			} else if r.skip[string(r.sk)] {
+				continue
+			}
+			return r.row(r.sk, r.sv)
+		}
+		r.over = r.over[1:]
+		return o.p.key, cloneRow(o.p.row, o.p.key, r.t), true, nil
+	}
+}
+
+// row is the row a stored entry names: the entry itself, or, on an index
+// walk, the row it points to.
+func (r *Rows) row(kb, vb []byte) (Key, Row, bool, error) {
+	var err error
 	if r.indexed {
 		if len(vb) != 0 {
 			return nil, nil, false, fmt.Errorf("%w: an index entry with a value", chunk.ErrCorrupt)
@@ -377,6 +436,7 @@ func (r *Rows) Next() (Key, Row, bool, error) {
 		if err != nil {
 			return nil, nil, false, err
 		}
+		var ok bool
 		if vb, ok, err = r.t.primary.Get(r.ctx, kb); err != nil {
 			return nil, nil, false, err
 		} else if !ok {
@@ -492,21 +552,71 @@ func (e *Editor) set(kb []byte, p *pendingRow) {
 }
 
 // Get reads the row with key as the table the editor would flush holds
-// it. Stub: the stored table.
+// it: its pending edit, else the stored row. It writes nothing.
 func (e *Editor) Get(ctx context.Context, key Key) (Row, bool, error) {
+	kb, err := e.t.encodeKey(key)
+	if err != nil {
+		return nil, false, err
+	}
+	if p, ok := e.pending[string(kb)]; ok {
+		if p.row == nil {
+			return nil, false, nil
+		}
+		return cloneRow(p.row, p.key, e.t), true, nil
+	}
 	return e.t.Get(ctx, key)
 }
 
-// Scan walks the table the editor would flush in key order. Stub: the
-// stored table.
+// Scan walks the table the editor would flush in key order: the stored
+// rows with the pending edits laid over them. It writes nothing.
 func (e *Editor) Scan(ctx context.Context) (*Rows, error) {
-	return e.t.Scan(ctx)
+	rows, err := e.t.Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows.skip = map[string]bool{}
+	for kb, p := range e.pending {
+		rows.skip[kb] = true
+		if p.row != nil {
+			rows.over = append(rows.over, rowOverlay{at: []byte(kb), p: p})
+		}
+	}
+	sort.Slice(rows.over, func(i, j int) bool { return bytes.Compare(rows.over[i].at, rows.over[j].at) < 0 })
+	return rows, nil
 }
 
 // IndexLookup walks the rows of the table the editor would flush whose
-// index columns equal values. Stub: the stored table.
+// index columns equal values, in the index's order: the stored rows, less
+// the ones the editor changed, with the pending rows that match laid over
+// them. It writes nothing.
 func (e *Editor) IndexLookup(ctx context.Context, index Tag, values ...any) (*Rows, error) {
-	return e.t.IndexLookup(ctx, index, values...)
+	rows, err := e.t.IndexLookup(ctx, index, values...)
+	if err != nil {
+		return nil, err
+	}
+	var lo []byte
+	for i, v := range values {
+		c, _, _ := e.t.schema.column(rows.index.Columns[i])
+		if lo, err = encodeCell(lo, c, v); err != nil {
+			return nil, err
+		}
+	}
+	rows.skip = map[string]bool{}
+	for kb, p := range e.pending {
+		rows.skip[kb] = true
+		if p.row == nil {
+			continue
+		}
+		ik, err := e.t.indexKey(*rows.index, p.row, []byte(kb))
+		if err != nil {
+			return nil, err
+		}
+		if bytes.HasPrefix(ik, lo) {
+			rows.over = append(rows.over, rowOverlay{at: ik, p: p})
+		}
+	}
+	sort.Slice(rows.over, func(i, j int) bool { return bytes.Compare(rows.over[i].at, rows.over[j].at) < 0 })
+	return rows, nil
 }
 
 // Insert adds a row, refusing a value that does not fit its column
