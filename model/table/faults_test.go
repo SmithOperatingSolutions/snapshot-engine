@@ -80,8 +80,11 @@ func TestStoreFaultsAreReported(t *testing.T) {
 	check("Diff", err)
 	_, err = m.Merge(ctx, tb.Root(), next.Root(), next.Root(), f)
 	check("Merge", err)
+	// A key inside the tree: its duplicate check must read a leaf. A key
+	// past the last one is answered from the root node the map holds
+	// (core v0.3.0), and reads nothing.
 	e := tb.Edit()
-	_, err = e.Insert(person(9000, "nine", nil, "n@x"))
+	_, err = e.Insert(person(1500, "mid", nil, "m@x"))
 	check("Insert (its duplicate check reads)", err)
 	f.reads = false
 	f.writes = true
