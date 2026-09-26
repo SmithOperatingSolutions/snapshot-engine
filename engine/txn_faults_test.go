@@ -291,6 +291,13 @@ func TestABackendFailingACommitWritesNothing(t *testing.T) {
 	fb.gets.Store(true)
 	check("the transaction's write unmergeable (its leaf unreadable)", tx.Commit(ctx))
 
+	tx = txnBegin(t, s)
+	if err := kindsCollection(t, tx, "users").PutJSON(ctx, []byte(fmt.Sprintf("u%05dx", faultN/3)), []byte(`{"n": 1}`)); err != nil {
+		t.Fatal(err)
+	}
+	fb.gets.Store(true)
+	check("the transaction's record unmergeable (its leaf unreadable)", tx.Commit(ctx))
+
 	// Another process commits meanwhile; this one cannot read what it wrote.
 	tx = write()
 	other, err := engine.Open(ctx, o)

@@ -590,10 +590,13 @@ func (h *Table) Get(ctx context.Context, key Key) (_ Row, _ bool, err error) {
 	if err := h.check(); err != nil {
 		return nil, false, err
 	}
-	if err := h.flush(ctx); err != nil {
-		return nil, false, err
+	var row Row
+	var ok bool
+	if h.ed != nil { // the pending edits over the stored rows: nothing is flushed for a read
+		row, ok, err = h.ed.Get(ctx, key)
+	} else {
+		row, ok, err = h.t.Get(ctx, key)
 	}
-	row, ok, err := h.t.Get(ctx, key)
 	if err != nil {
 		return nil, false, tableErr(err)
 	}
@@ -607,10 +610,12 @@ func (h *Table) Scan(ctx context.Context, each func(Key, Row) (bool, error)) (er
 	if err := h.check(); err != nil {
 		return err
 	}
-	if err := h.flush(ctx); err != nil {
-		return err
+	var rows *table.Rows
+	if h.ed != nil {
+		rows, err = h.ed.Scan(ctx)
+	} else {
+		rows, err = h.t.Scan(ctx)
 	}
-	rows, err := h.t.Scan(ctx)
 	if err != nil {
 		return tableErr(err)
 	}
@@ -623,10 +628,12 @@ func (h *Table) Lookup(ctx context.Context, index Tag, values []any, each func(K
 	if err := h.check(); err != nil {
 		return err
 	}
-	if err := h.flush(ctx); err != nil {
-		return err
+	var rows *table.Rows
+	if h.ed != nil {
+		rows, err = h.ed.IndexLookup(ctx, index, values...)
+	} else {
+		rows, err = h.t.IndexLookup(ctx, index, values...)
 	}
-	rows, err := h.t.IndexLookup(ctx, index, values...)
 	if err != nil {
 		return tableErr(err)
 	}
@@ -768,10 +775,13 @@ func (m *KV) Get(ctx context.Context, key []byte) (_ Value, _ bool, err error) {
 	if err := m.check(); err != nil {
 		return Value{}, false, err
 	}
-	if err := m.flush(ctx); err != nil {
-		return Value{}, false, err
+	var v Value
+	var ok bool
+	if m.ed != nil { // the pending edits over the stored map: nothing is flushed for a read
+		v, ok, err = m.ed.Get(ctx, key)
+	} else {
+		v, ok, err = m.m.Get(ctx, key)
 	}
-	v, ok, err := m.m.Get(ctx, key)
 	if err != nil {
 		return Value{}, false, kvErr(err)
 	}
@@ -805,10 +815,12 @@ func (m *KV) Scan(ctx context.Context, from []byte, each func([]byte, Value) (bo
 	if err := m.check(); err != nil {
 		return err
 	}
-	if err := m.flush(ctx); err != nil {
-		return err
+	var es *kv.Entries
+	if m.ed != nil {
+		es, err = m.ed.Scan(ctx, from)
+	} else {
+		es, err = m.m.Scan(ctx, from)
 	}
-	es, err := m.m.Scan(ctx, from)
 	if err != nil {
 		return kvErr(err)
 	}
@@ -888,10 +900,13 @@ func (c *Collection) Get(ctx context.Context, id []byte) (_ Node, _ bool, err er
 	if err := c.check(); err != nil {
 		return Node{}, false, err
 	}
-	if err := c.flush(ctx); err != nil {
-		return Node{}, false, err
+	var n Node
+	var ok bool
+	if c.ed != nil { // the pending edits over the stored records: nothing is flushed for a read
+		n, ok, err = c.ed.Get(ctx, id)
+	} else {
+		n, ok, err = c.c.Get(ctx, id)
 	}
-	n, ok, err := c.c.Get(ctx, id)
 	if err != nil {
 		return Node{}, false, docErr(err)
 	}
@@ -936,10 +951,12 @@ func (c *Collection) Scan(ctx context.Context, from []byte, each func([]byte, No
 	if err := c.check(); err != nil {
 		return err
 	}
-	if err := c.flush(ctx); err != nil {
-		return err
+	var rs *document.Records
+	if c.ed != nil {
+		rs, err = c.ed.Scan(ctx, from)
+	} else {
+		rs, err = c.c.Scan(ctx, from)
 	}
-	rs, err := c.c.Scan(ctx, from)
 	if err != nil {
 		return docErr(err)
 	}

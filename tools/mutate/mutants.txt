@@ -791,8 +791,8 @@ run: ^TestAMapRefusesWhatIsNotOurs$
 
 id: kv-handle-scan-checks-the-frame
 file: model/kv/handle.go
-find: if v, err = checked(k, f); err != nil {
-replace: if v, _ = checked(k, f); err != nil {
+find: if v, err = checked(e.sk, e.sf); err != nil {
+replace: if v, _ = checked(e.sk, e.sf); err != nil {
 pkg: ./model/kv
 run: ^TestAMapRefusesWhatIsNotOurs$
 
@@ -847,8 +847,8 @@ run: ^TestACollectionRefusesWhatIsNotOurs$
 
 id: document-handle-scan-checks-the-frame
 file: model/document/handle.go
-find: if n, err = checked(k, f); err != nil {
-replace: if n, _ = checked(k, f); err != nil {
+find: if n, err = checked(r.sk, r.sf); err != nil {
+replace: if n, _ = checked(r.sk, r.sf); err != nil {
 pkg: ./model/document
 run: ^TestACollectionRefusesWhatIsNotOurs$
 
@@ -1035,20 +1035,6 @@ replace: \tnext.Working = w.Root() // the engine keeps no staging area
 pkg: ./engine
 run: ^TestABranchMidMergeTakesNoTransaction$
 
-id: engine-txn-reads-see-own-writes
-file: engine/txn.go
-find: \tif err := h.flush(ctx); err != nil {\n\t\treturn nil, false, err\n\t}
-replace: \tif err := error(nil); err != nil {\n\t\treturn nil, false, err\n\t}
-pkg: ./engine
-run: ^TestATransactionReadsItsSnapshotAndItsOwnWrites$
-
-id: engine-txn-scan-sees-own-writes
-file: engine/txn.go
-find: \tif err := h.flush(ctx); err != nil {\n\t\treturn err\n\t}\n\trows, err := h.t.Scan(ctx)
-replace: \tif err := error(nil); err != nil {\n\t\treturn err\n\t}\n\trows, err := h.t.Scan(ctx)
-pkg: ./engine
-run: ^TestATransactionReadsItsSnapshotAndItsOwnWrites$
-
 id: engine-txn-a-scan-stops-when-told
 file: engine/txn.go
 find: \t\tif more, err := each(k, r); err != nil || !more {
@@ -1069,13 +1055,6 @@ find: \tcase errors.Is(err, table.ErrDuplicate):\n\t\tto = ErrExists
 replace: \tcase errors.Is(err, table.ErrDuplicate):\n\t\tto = ErrInvalid
 pkg: ./engine
 run: ^TestARefusedWriteWritesNothing$
-
-id: engine-txn-lookup-sees-own-writes
-file: engine/txn.go
-find: \tif err := h.flush(ctx); err != nil {\n\t\treturn err\n\t}\n\trows, err := h.t.IndexLookup(ctx, index, values...)
-replace: \tif err := error(nil); err != nil {\n\t\treturn err\n\t}\n\trows, err := h.t.IndexLookup(ctx, index, values...)
-pkg: ./engine
-run: ^TestATransactionReadsItsSnapshotAndItsOwnWrites$
 
 id: engine-txn-an-open-table-is-one-handle
 file: engine/txn.go
@@ -1579,20 +1558,6 @@ replace: func (c *Collection) drop() {}
 pkg: ./engine
 run: ^TestKVAndCollectionsAreObjectsByName$
 
-id: engine-txn-kinds-kv-reads-see-own-writes
-file: engine/txn.go
-find: \tif err := m.flush(ctx); err != nil {\n\t\treturn Value{}, false, err\n\t}
-replace: \tif err := error(nil); err != nil {\n\t\treturn Value{}, false, err\n\t}
-pkg: ./engine
-run: ^TestAKVHandleReadsItsWritesAndRefusesWhatIsNotAValue$
-
-id: engine-txn-kinds-collection-reads-see-own-writes
-file: engine/txn.go
-find: \tif err := c.flush(ctx); err != nil {\n\t\treturn Node{}, false, err\n\t}
-replace: \tif err := error(nil); err != nil {\n\t\treturn Node{}, false, err\n\t}
-pkg: ./engine
-run: ^TestACollectionHandleReadsItsWritesAndRefusesWhatIsNotADocument$
-
 id: engine-txn-kinds-a-refused-kv-value-is-invalid
 file: engine/txn.go
 find: \tcase errors.Is(err, kv.ErrKey), errors.Is(err, kv.ErrValue):
@@ -1620,20 +1585,6 @@ find: \t\tif more, err := each(id, n); err != nil || !more {
 replace: \t\tif _, err := each(id, n); err != nil {
 pkg: ./engine
 run: ^TestACollectionHandleReadsItsWritesAndRefusesWhatIsNotADocument$
-
-id: engine-txn-kinds-kv-scans-see-own-writes
-file: engine/txn.go
-find: \tif err := m.flush(ctx); err != nil {\n\t\treturn err\n\t}\n\tes, err := m.m.Scan(ctx, from)
-replace: \tif err := error(nil); err != nil {\n\t\treturn err\n\t}\n\tes, err := m.m.Scan(ctx, from)
-pkg: ./engine
-run: ^TestAScanSeesWritesNotYetRead$
-
-id: engine-txn-kinds-collection-scans-see-own-writes
-file: engine/txn.go
-find: \tif err := c.flush(ctx); err != nil {\n\t\treturn err\n\t}\n\trs, err := c.c.Scan(ctx, from)
-replace: \tif err := error(nil); err != nil {\n\t\treturn err\n\t}\n\trs, err := c.c.Scan(ctx, from)
-pkg: ./engine
-run: ^TestAScanSeesWritesNotYetRead$
 
 id: engine-txn-faults-begin-surfaces-an-unreadable-working-set
 file: engine/txn.go
@@ -1679,22 +1630,22 @@ run: ^TestABackendFailingAReadFailsTheCall$
 
 id: engine-txn-faults-a-table-read-surfaces-a-failure
 file: engine/txn.go
-find: row, ok, err := h.t.Get(ctx, key)\n\tif err != nil {
-replace: row, ok, err := h.t.Get(ctx, key)\n\tif err != nil && false {
+find: \t\trow, ok, err = h.t.Get(ctx, key)\n\t}\n\tif err != nil {
+replace: \t\trow, ok, err = h.t.Get(ctx, key)\n\t}\n\tif err != nil && false {
 pkg: ./engine
 run: ^TestABackendFailingAReadFailsTheCall$
 
 id: engine-txn-faults-a-kv-read-surfaces-a-failure
 file: engine/txn.go
-find: v, ok, err := m.m.Get(ctx, key)\n\tif err != nil {
-replace: v, ok, err := m.m.Get(ctx, key)\n\tif err != nil && false {
+find: \t\tv, ok, err = m.m.Get(ctx, key)\n\t}\n\tif err != nil {
+replace: \t\tv, ok, err = m.m.Get(ctx, key)\n\t}\n\tif err != nil && false {
 pkg: ./engine
 run: ^TestABackendFailingAReadFailsTheCall$
 
 id: engine-txn-faults-a-collection-read-surfaces-a-failure
 file: engine/txn.go
-find: n, ok, err := c.c.Get(ctx, id)\n\tif err != nil {
-replace: n, ok, err := c.c.Get(ctx, id)\n\tif err != nil && false {
+find: \t\tn, ok, err = c.c.Get(ctx, id)\n\t}\n\tif err != nil {
+replace: \t\tn, ok, err = c.c.Get(ctx, id)\n\t}\n\tif err != nil && false {
 pkg: ./engine
 run: ^TestABackendFailingAReadFailsTheCall$
 
@@ -1703,14 +1654,14 @@ file: engine/txn.go
 find: next, err := m.ed.Flush(ctx)\n\tif err != nil {
 replace: next, err := m.ed.Flush(ctx)\n\tif err != nil && false {
 pkg: ./engine
-run: ^TestABackendFailingAReadFailsTheCall$
+run: ^(TestABackendFailingACommitWritesNothing|TestABackendFailingAReadFailsTheCall)$
 
 id: engine-txn-faults-a-collection-flush-surfaces-a-failure
 file: engine/txn.go
 find: next, err := c.ed.Flush(ctx)\n\tif err != nil {
 replace: next, err := c.ed.Flush(ctx)\n\tif err != nil && false {
 pkg: ./engine
-run: ^TestABackendFailingAReadFailsTheCall$
+run: ^(TestABackendFailingACommitWritesNothing|TestABackendFailingAReadFailsTheCall)$
 
 id: engine-txn-faults-a-finished-transactions-kv-map-refuses
 file: engine/txn.go
@@ -2492,3 +2443,123 @@ find: \t\tr.refs[path] = object.Ref{Model: r.refs[path].Model, Root: root}
 replace: \t\tr.refs[path] = object.Ref{Model: r.refs[path].Model, Root: r.refs[path].Root}\n\t\t_ = root
 pkg: ./engine
 run: ^TestConcurrentTransactionsShareAPublish$
+
+# read your writes without a flush (#9, DESIGN D13)
+id: kv-an-editor-reads-its-pending-edit
+file: model/kv/handle.go
+find: \tif p, ok := e.pending[string(key)]; ok {\n\t\tif p == nil {\n\t\t\treturn Value{}, false, nil\n\t\t}\n\t\treturn *p, true, nil\n\t}\n\treturn e.m.Get(ctx, key)
+replace: \treturn e.m.Get(ctx, key)
+pkg: ./model/kv
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: kv-a-scan-lays-a-pending-edit-over-a-stored-entry
+file: model/kv/handle.go
+find: \t\tif e.sok && bytes.Equal(e.sk, o.key) {\n\t\t\te.primed = false\n\t\t}
+replace: \t\tif false {\n\t\t\te.primed = false\n\t\t}
+pkg: ./model/kv
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: kv-a-scan-drops-a-pending-delete
+file: model/kv/handle.go
+find: \t\tif o.v != nil {\n\t\t\treturn o.key, *o.v, true, nil\n\t\t}
+replace: \t\tif o.v == nil {\n\t\t\treturn o.key, Value{}, true, nil\n\t\t}\n\t\treturn o.key, *o.v, true, nil
+pkg: ./model/kv
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: kv-a-scan-starts-at-from-for-pending-edits-too
+file: model/kv/handle.go
+find: \t\tif bytes.Compare([]byte(k), from) >= 0 {\n\t\t\tover = append(over, overlay{key: []byte(k), v: v})\n\t\t}
+replace: \t\tover = append(over, overlay{key: []byte(k), v: v})
+pkg: ./model/kv
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: document-an-editor-reads-its-pending-edit
+file: model/document/handle.go
+find: \tif p, ok := e.pending[string(id)]; ok {\n\t\tif p == nil {\n\t\t\treturn merge.Node{}, false, nil\n\t\t}\n\t\treturn *p, true, nil\n\t}\n\treturn e.c.Get(ctx, id)
+replace: \treturn e.c.Get(ctx, id)
+pkg: ./model/document
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: document-a-scan-lays-a-pending-edit-over-a-stored-record
+file: model/document/handle.go
+find: \t\tif r.sok && bytes.Equal(r.sk, o.id) {\n\t\t\tr.primed = false\n\t\t}
+replace: \t\tif false {\n\t\t\tr.primed = false\n\t\t}
+pkg: ./model/document
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: table-an-editor-reads-its-pending-row
+file: model/table/store.go
+find: \tif p, ok := e.pending[string(kb)]; ok {\n\t\tif p.row == nil {\n\t\t\treturn nil, false, nil\n\t\t}\n\t\treturn cloneRow(p.row, p.key, e.t), true, nil\n\t}\n\treturn e.t.Get(ctx, key)
+replace: \t_ = kb\n\treturn e.t.Get(ctx, key)
+pkg: ./model/table
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: table-a-scan-skips-the-stored-row-the-editor-changed
+file: model/table/store.go
+find: \t\t\t} else if r.skip[string(r.sk)] {\n\t\t\t\tcontinue\n\t\t\t}
+replace: \t\t\t}
+pkg: ./model/table
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: table-a-lookup-skips-the-stored-entry-of-a-row-the-editor-changed
+file: model/table/store.go
+find: \t\t\t\tif r.skip[string(rk)] {\n\t\t\t\t\tcontinue\n\t\t\t\t}
+replace: \t\t\t\t_ = rk
+pkg: ./model/table
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: table-a-lookup-lays-over-only-the-pending-rows-that-match
+file: model/table/store.go
+find: \t\tif bytes.HasPrefix(ik, lo) {\n\t\t\trows.over = append(rows.over, rowOverlay{at: ik, p: p})\n\t\t}
+replace: \t\trows.over = append(rows.over, rowOverlay{at: ik, p: p})
+pkg: ./model/table
+run: ^TestAnEditorReadsWhatItWouldFlush$
+
+id: engine-a-table-handle-reads-through-its-editor
+file: engine/txn.go
+find: \tif h.ed != nil { // the pending edits over the stored rows: nothing is flushed for a read\n\t\trow, ok, err = h.ed.Get(ctx, key)
+replace: \tif false {\n\t\trow, ok, err = h.ed.Get(ctx, key)
+pkg: ./engine
+run: ^TestATransactionReadsItsWritesWithoutFlushingThem$
+
+id: engine-a-kv-handle-reads-through-its-editor
+file: engine/txn.go
+find: \tif m.ed != nil { // the pending edits over the stored map: nothing is flushed for a read\n\t\tv, ok, err = m.ed.Get(ctx, key)
+replace: \tif false {\n\t\tv, ok, err = m.ed.Get(ctx, key)
+pkg: ./engine
+run: ^TestATransactionReadsItsWritesWithoutFlushingThem$
+
+id: engine-a-collection-handle-reads-through-its-editor
+file: engine/txn.go
+find: \tif c.ed != nil { // the pending edits over the stored records: nothing is flushed for a read\n\t\tn, ok, err = c.ed.Get(ctx, id)
+replace: \tif false {\n\t\tn, ok, err = c.ed.Get(ctx, id)
+pkg: ./engine
+run: ^TestATransactionReadsItsWritesWithoutFlushingThem$
+
+id: engine-a-table-scan-reads-through-the-editor
+file: engine/txn.go
+find: \tif h.ed != nil {\n\t\trows, err = h.ed.Scan(ctx)
+replace: \tif false {\n\t\trows, err = h.ed.Scan(ctx)
+pkg: ./engine
+run: ^TestATransactionReadsItsWritesWithoutFlushingThem$
+
+id: engine-a-lookup-reads-through-the-editor
+file: engine/txn.go
+find: \tif h.ed != nil {\n\t\trows, err = h.ed.IndexLookup(ctx, index, values...)
+replace: \tif false {\n\t\trows, err = h.ed.IndexLookup(ctx, index, values...)
+pkg: ./engine
+run: ^TestATransactionReadsItsWritesWithoutFlushingThem$
+
+id: engine-a-kv-scan-reads-through-the-editor
+file: engine/txn.go
+find: \tif m.ed != nil {\n\t\tes, err = m.ed.Scan(ctx, from)
+replace: \tif false {\n\t\tes, err = m.ed.Scan(ctx, from)
+pkg: ./engine
+run: ^(TestATransactionReadsItsWritesWithoutFlushingThem|TestAScanSeesWritesNotYetRead)$
+
+id: engine-a-collection-scan-reads-through-the-editor
+file: engine/txn.go
+find: \tif c.ed != nil {\n\t\trs, err = c.ed.Scan(ctx, from)
+replace: \tif false {\n\t\trs, err = c.ed.Scan(ctx, from)
+pkg: ./engine
+run: ^(TestATransactionReadsItsWritesWithoutFlushingThem|TestAScanSeesWritesNotYetRead)$

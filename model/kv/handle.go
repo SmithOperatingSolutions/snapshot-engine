@@ -1,7 +1,9 @@
 package kv
 
 import (
+	"bytes"
 	"context"
+	"sort"
 
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/model"
@@ -67,29 +69,70 @@ func (m *Map) Scan(ctx context.Context, from []byte) (*Entries, error) {
 	return &Entries{it: it}, nil
 }
 
-// Entries walks a map's entries in key order.
-type Entries struct{ it *prolly.Iter }
+// Entries walks a map's entries in key order: the stored entries, with an
+// editor's pending edits laid over them when it made the scan.
+type Entries struct {
+	it   *prolly.Iter
+	over []overlay // pending edits from the scan's start, in key order
+	// the stored entry read ahead, so the two can be merged
+	sk, sf []byte
+	sok    bool
+	primed bool
+}
+
+// overlay is one pending edit: a nil value is a delete.
+type overlay struct {
+	key []byte
+	v   *Value
+}
 
 // Next is the next entry; ok is false at the end. A stored entry that is
 // not ours is an error.
 func (e *Entries) Next() (key []byte, v Value, ok bool, err error) {
-	k, f, ok, err := e.it.Next()
-	if err != nil || !ok {
-		return nil, Value{}, false, err
+	for {
+		if !e.primed {
+			if e.sk, e.sf, e.sok, err = e.it.Next(); err != nil {
+				return nil, Value{}, false, err
+			}
+			e.primed = true
+		}
+		var o *overlay
+		if len(e.over) > 0 {
+			o = &e.over[0]
+		}
+		if o == nil && !e.sok {
+			return nil, Value{}, false, nil
+		}
+		// The stored entry comes first, or the pending one; on the same
+		// key the pending edit replaces or deletes the stored entry.
+		if o == nil || (e.sok && bytes.Compare(e.sk, o.key) < 0) {
+			e.primed = false
+			if v, err = checked(e.sk, e.sf); err != nil {
+				return nil, Value{}, false, err
+			}
+			return e.sk, v, true, nil
+		}
+		if e.sok && bytes.Equal(e.sk, o.key) {
+			e.primed = false
+		}
+		e.over = e.over[1:]
+		if o.v != nil {
+			return o.key, *o.v, true, nil
+		}
 	}
-	if v, err = checked(k, f); err != nil {
-		return nil, Value{}, false, err
-	}
-	return k, v, true, nil
 }
 
 // Edit starts editing m.
-func (m *Map) Edit() *MapEditor { return &MapEditor{m: m, ed: m.m.Editor()} }
+func (m *Map) Edit() *MapEditor {
+	return &MapEditor{m: m, ed: m.m.Editor(), pending: map[string]*Value{}}
+}
 
-// MapEditor holds edits to a map until Flush.
+// MapEditor holds edits to a map until Flush, and reads them back over the
+// stored map meanwhile (#9).
 type MapEditor struct {
-	m  *Map
-	ed *prolly.Editor
+	m       *Map
+	ed      *prolly.Editor
+	pending map[string]*Value // by key; nil: a delete
 }
 
 // Set writes key, refusing a key that cannot exist (ErrKey) and a value
@@ -103,7 +146,13 @@ func (e *MapEditor) Set(key []byte, v Value) error {
 	if err != nil {
 		return err
 	}
-	return e.ed.Put(key, f)
+	if err := e.ed.Put(key, f); err != nil {
+		return err
+	}
+	kept := v
+	kept.Bytes = bytes.Clone(v.Bytes)
+	e.pending[string(key)] = &kept
+	return nil
 }
 
 // Delete removes key; a key that is not there is a no-op.
@@ -111,7 +160,44 @@ func (e *MapEditor) Delete(key []byte) error {
 	if err := checkKey(key); err != nil {
 		return err
 	}
-	return e.ed.Delete(key)
+	if err := e.ed.Delete(key); err != nil {
+		return err
+	}
+	e.pending[string(key)] = nil
+	return nil
+}
+
+// Get reads key as the map the editor would flush holds it: its pending
+// edit, else the stored entry. It writes nothing.
+func (e *MapEditor) Get(ctx context.Context, key []byte) (Value, bool, error) {
+	if err := checkKey(key); err != nil {
+		return Value{}, false, err
+	}
+	if p, ok := e.pending[string(key)]; ok {
+		if p == nil {
+			return Value{}, false, nil
+		}
+		return *p, true, nil
+	}
+	return e.m.Get(ctx, key)
+}
+
+// Scan walks the map the editor would flush from key from, inclusive
+// (nil: the first), in key order: the stored entries with the pending
+// edits laid over them. It writes nothing.
+func (e *MapEditor) Scan(ctx context.Context, from []byte) (*Entries, error) {
+	it, err := e.m.m.IterRange(ctx, from, nil)
+	if err != nil {
+		return nil, err
+	}
+	var over []overlay
+	for k, v := range e.pending {
+		if bytes.Compare([]byte(k), from) >= 0 {
+			over = append(over, overlay{key: []byte(k), v: v})
+		}
+	}
+	sort.Slice(over, func(i, j int) bool { return bytes.Compare(over[i].key, over[j].key) < 0 })
+	return &Entries{it: it, over: over}, nil
 }
 
 // Flush writes the edits and returns the new map; the editor goes on

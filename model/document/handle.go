@@ -1,7 +1,9 @@
 package document
 
 import (
+	"bytes"
 	"context"
+	"sort"
 
 	"github.com/SmithOperatingSolutions/snapshot-core/core/chunk"
 	"github.com/SmithOperatingSolutions/snapshot-core/core/model"
@@ -69,29 +71,70 @@ func (c *Collection) Scan(ctx context.Context, from []byte) (*Records, error) {
 	return &Records{it: it}, nil
 }
 
-// Records walks a collection's records in id order.
-type Records struct{ it *prolly.Iter }
+// Records walks a collection's records in id order: the stored records,
+// with an editor's pending edits laid over them when it made the scan.
+type Records struct {
+	it   *prolly.Iter
+	over []overlay // pending edits from the scan's start, in id order
+	// the stored record read ahead, so the two can be merged
+	sk, sf []byte
+	sok    bool
+	primed bool
+}
+
+// overlay is one pending edit: a nil node is a delete.
+type overlay struct {
+	id []byte
+	n  *merge.Node
+}
 
 // Next is the next record; ok is false at the end. A stored record that is
 // not ours is an error.
 func (r *Records) Next() (id []byte, n merge.Node, ok bool, err error) {
-	k, f, ok, err := r.it.Next()
-	if err != nil || !ok {
-		return nil, merge.Node{}, false, err
+	for {
+		if !r.primed {
+			if r.sk, r.sf, r.sok, err = r.it.Next(); err != nil {
+				return nil, merge.Node{}, false, err
+			}
+			r.primed = true
+		}
+		var o *overlay
+		if len(r.over) > 0 {
+			o = &r.over[0]
+		}
+		if o == nil && !r.sok {
+			return nil, merge.Node{}, false, nil
+		}
+		// The stored record comes first, or the pending one; on the same
+		// id the pending edit replaces or deletes the stored record.
+		if o == nil || (r.sok && bytes.Compare(r.sk, o.id) < 0) {
+			r.primed = false
+			if n, err = checked(r.sk, r.sf); err != nil {
+				return nil, merge.Node{}, false, err
+			}
+			return r.sk, n, true, nil
+		}
+		if r.sok && bytes.Equal(r.sk, o.id) {
+			r.primed = false
+		}
+		r.over = r.over[1:]
+		if o.n != nil {
+			return o.id, *o.n, true, nil
+		}
 	}
-	if n, err = checked(k, f); err != nil {
-		return nil, merge.Node{}, false, err
-	}
-	return k, n, true, nil
 }
 
 // Edit starts editing c.
-func (c *Collection) Edit() *CollectionEditor { return &CollectionEditor{c: c, ed: c.m.Editor()} }
+func (c *Collection) Edit() *CollectionEditor {
+	return &CollectionEditor{c: c, ed: c.m.Editor(), pending: map[string]*merge.Node{}}
+}
 
-// CollectionEditor holds edits to a collection until Flush.
+// CollectionEditor holds edits to a collection until Flush, and reads them
+// back over the stored records meanwhile (#9).
 type CollectionEditor struct {
-	c  *Collection
-	ed *prolly.Editor
+	c       *Collection
+	ed      *prolly.Editor
+	pending map[string]*merge.Node // by id; nil: a delete
 }
 
 // Put writes the record with id, refusing an id that cannot exist (ErrID)
@@ -105,7 +148,12 @@ func (e *CollectionEditor) Put(id []byte, n merge.Node) error {
 	if err != nil {
 		return err
 	}
-	return e.ed.Put(id, f)
+	if err := e.ed.Put(id, f); err != nil {
+		return err
+	}
+	kept := n
+	e.pending[string(id)] = &kept
+	return nil
 }
 
 // PutJSON parses text with the model's bounded parser and writes it; text
@@ -123,7 +171,44 @@ func (e *CollectionEditor) Delete(id []byte) error {
 	if err := checkID(id); err != nil {
 		return err
 	}
-	return e.ed.Delete(id)
+	if err := e.ed.Delete(id); err != nil {
+		return err
+	}
+	e.pending[string(id)] = nil
+	return nil
+}
+
+// Get reads the record with id as the collection the editor would flush
+// holds it: its pending edit, else the stored record. It writes nothing.
+func (e *CollectionEditor) Get(ctx context.Context, id []byte) (merge.Node, bool, error) {
+	if err := checkID(id); err != nil {
+		return merge.Node{}, false, err
+	}
+	if p, ok := e.pending[string(id)]; ok {
+		if p == nil {
+			return merge.Node{}, false, nil
+		}
+		return *p, true, nil
+	}
+	return e.c.Get(ctx, id)
+}
+
+// Scan walks the collection the editor would flush from id from, inclusive
+// (nil: the first), in id order: the stored records with the pending edits
+// laid over them. It writes nothing.
+func (e *CollectionEditor) Scan(ctx context.Context, from []byte) (*Records, error) {
+	it, err := e.c.m.IterRange(ctx, from, nil)
+	if err != nil {
+		return nil, err
+	}
+	var over []overlay
+	for id, n := range e.pending {
+		if bytes.Compare([]byte(id), from) >= 0 {
+			over = append(over, overlay{id: []byte(id), n: n})
+		}
+	}
+	sort.Slice(over, func(i, j int) bool { return bytes.Compare(over[i].id, over[j].id) < 0 })
+	return &Records{it: it, over: over}, nil
 }
 
 // Flush writes the edits and returns the new collection; the editor goes
